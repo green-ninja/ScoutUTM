@@ -302,6 +302,75 @@ func TestCreatePeer_WireGuardDisabled(t *testing.T) {
 	}
 }
 
+func TestCreatePeer_FullTunnel(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+	enableWireGuard(t, srv)
+	router := srv.Router()
+
+	body, _ := json.Marshal(createPeerRequest{Name: "phone", SplitTunnel: false})
+	req := httptest.NewRequest("POST", "/api/v1/vpn/wireguard/peers", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /vpn/wireguard/peers: status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var resp createPeerResponse
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// Full tunnel should have AllowedIPs = 0.0.0.0/0.
+	if !bytes.Contains([]byte(resp.ClientConfig), []byte("AllowedIPs = 0.0.0.0/0")) {
+		t.Errorf("full tunnel client config missing AllowedIPs = 0.0.0.0/0\n%s", resp.ClientConfig)
+	}
+
+	// DNS should point to LAN IP (192.168.1.1), not tunnel IP (10.0.0.1).
+	if !bytes.Contains([]byte(resp.ClientConfig), []byte("DNS = 192.168.1.1")) {
+		t.Errorf("client config should use LAN IP for DNS\n%s", resp.ClientConfig)
+	}
+}
+
+func TestCreatePeer_SplitTunnel(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+	enableWireGuard(t, srv)
+	router := srv.Router()
+
+	body, _ := json.Marshal(createPeerRequest{Name: "laptop", SplitTunnel: true})
+	req := httptest.NewRequest("POST", "/api/v1/vpn/wireguard/peers", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /vpn/wireguard/peers: status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var resp createPeerResponse
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// Split tunnel should NOT have AllowedIPs = 0.0.0.0/0.
+	if bytes.Contains([]byte(resp.ClientConfig), []byte("AllowedIPs = 0.0.0.0/0")) {
+		t.Errorf("split tunnel should not have AllowedIPs = 0.0.0.0/0\n%s", resp.ClientConfig)
+	}
+
+	// Should include the LAN subnet.
+	if !bytes.Contains([]byte(resp.ClientConfig), []byte("192.168.1.0/24")) {
+		t.Errorf("split tunnel should include LAN subnet\n%s", resp.ClientConfig)
+	}
+
+	// Should include the tunnel subnet so peers can reach the server.
+	if !bytes.Contains([]byte(resp.ClientConfig), []byte("10.0.0.0/24")) {
+		t.Errorf("split tunnel should include tunnel subnet\n%s", resp.ClientConfig)
+	}
+}
+
 func TestAllocateTunnelIP(t *testing.T) {
 	// Empty peers — should get .2
 	ip, err := allocateTunnelIP("10.0.0.0/24", nil)

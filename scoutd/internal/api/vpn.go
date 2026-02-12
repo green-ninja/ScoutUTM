@@ -137,7 +137,8 @@ func (s *Server) handleGetPeers(w http.ResponseWriter, r *http.Request) {
 
 // createPeerRequest is the request body for POST /vpn/wireguard/peers.
 type createPeerRequest struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	SplitTunnel bool   `json:"split_tunnel"`
 }
 
 // createPeerResponse is returned when a peer is created.
@@ -221,13 +222,19 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) {
 	if endpoint == "" {
 		endpoint = "YOUR_SERVER_IP"
 	}
-	clientConfig := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = %s/32\nDNS = %s\n\n[Peer]\nPublicKey = %s\nEndpoint = %s:%d\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n",
+	dnsIP := lanIP(cfg)
+	clientAllowedIPs := "0.0.0.0/0"
+	if req.SplitTunnel {
+		clientAllowedIPs = lanCIDRs(cfg)
+	}
+	clientConfig := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = %s/32\nDNS = %s\n\n[Peer]\nPublicKey = %s\nEndpoint = %s:%d\nAllowedIPs = %s\nPersistentKeepalive = 25\n",
 		clientPriv,
 		tunnelIP,
-		extractIP(wg.Address),
+		dnsIP,
 		serverPub,
 		endpoint,
 		wg.ListenPort,
+		clientAllowedIPs,
 	)
 
 	// Generate QR code.
@@ -367,6 +374,57 @@ func allocateTunnelIP(subnetCIDR string, peers []config.WireGuardPeer) (string, 
 	}
 
 	return "", fmt.Errorf("no available tunnel IPs in %s", subnetCIDR)
+}
+
+// lanIP returns the LAN interface IP from the config.
+// VPN clients use this as their DNS server so queries route through Unbound.
+func lanIP(cfg *config.Config) string {
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone == "lan" && iface.IPv4Address != "" {
+			ip, _, err := net.ParseCIDR(iface.IPv4Address)
+			if err == nil {
+				return ip.String()
+			}
+		}
+	}
+	return "192.168.1.1"
+}
+
+// lanCIDRs returns a comma-separated list of local network CIDRs plus the tunnel subnet,
+// used for split-tunnel AllowedIPs so only home traffic routes through the VPN.
+func lanCIDRs(cfg *config.Config) string {
+	var cidrs []string
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone == "wan" {
+			continue
+		}
+		if iface.IPv4Address != "" {
+			_, ipnet, err := net.ParseCIDR(iface.IPv4Address)
+			if err == nil {
+				cidrs = append(cidrs, ipnet.String())
+			}
+		}
+	}
+	for _, vlan := range cfg.Network.VLANs {
+		if vlan.Subnet != "" {
+			_, ipnet, err := net.ParseCIDR(vlan.Subnet)
+			if err == nil {
+				cidrs = append(cidrs, ipnet.String())
+			}
+		}
+	}
+	// Include tunnel subnet so peers can reach the server.
+	if cfg.VPN.WireGuard.TunnelSubnet != "" {
+		cidrs = append(cidrs, cfg.VPN.WireGuard.TunnelSubnet)
+	}
+	if len(cidrs) == 0 {
+		return "192.168.1.0/24"
+	}
+	result := cidrs[0]
+	for _, c := range cidrs[1:] {
+		result += ", " + c
+	}
+	return result
 }
 
 // extractIP returns the IP portion of a CIDR string.

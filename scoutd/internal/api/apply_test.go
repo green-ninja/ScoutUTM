@@ -198,6 +198,25 @@ func TestAffectedDaemons_VPNChange(t *testing.T) {
 	}
 }
 
+func TestAffectedDaemons_NetworkChange_TriggersChrony(t *testing.T) {
+	old := config.DefaultConfig()
+	new_, _ := old.DeepCopy()
+	new_.Network.VLANs = append(new_.Network.VLANs, config.VLANConfig{
+		ID: 20, Parent: "eth1", Zone: "iot", Subnet: "192.168.20.1/24",
+	})
+
+	daemons := affectedDaemons(old, new_)
+	found := false
+	for _, d := range daemons {
+		if d == "chrony" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected chrony in affected daemons for network change (allow list includes VLAN subnets)")
+	}
+}
+
 func TestAffectedDaemons_NoChange(t *testing.T) {
 	old := config.DefaultConfig()
 	new_, _ := old.DeepCopy()

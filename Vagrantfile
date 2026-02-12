@@ -3,8 +3,8 @@ Vagrant.configure("2") do |config|
   config.vm.hostname = "scoututm-dev"
 
   config.vm.provider "virtualbox" do |vb|
-    vb.cpus = 2
-    vb.memory = 2048
+    vb.cpus = 4
+    vb.memory = 8048
     vb.name = "scoututm-dev"
   end
 

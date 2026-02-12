@@ -302,6 +302,82 @@ func TestRenderNftables_WireGuardDisabled(t *testing.T) {
 	}
 }
 
+func TestRenderNftables_WireGuardVPNInputChain(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.VPN.WireGuard.Enabled = true
+	cfg.VPN.WireGuard.ListenPort = 51820
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	// VPN input chain should exist.
+	if !strings.Contains(content, "chain input_vpn") {
+		t.Error("expected input_vpn chain when WireGuard enabled")
+	}
+
+	// Jump to input_vpn from main input chain.
+	if !strings.Contains(content, "iifname wg0 jump input_vpn") {
+		t.Error("expected jump to input_vpn for wg0")
+	}
+
+	// DNS redirect for VPN clients.
+	if !strings.Contains(content, "iifname wg0 udp dport 53 redirect") {
+		t.Error("expected DNS redirect for VPN clients (UDP)")
+	}
+	if !strings.Contains(content, "iifname wg0 tcp dport 53 redirect") {
+		t.Error("expected DNS redirect for VPN clients (TCP)")
+	}
+}
+
+func TestRenderNftables_WireGuardVPNForwarding(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.VPN.WireGuard.Enabled = true
+	cfg.VPN.WireGuard.ListenPort = 51820
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	// VPN clients should be able to forward to WAN.
+	if !strings.Contains(content, "iifname wg0 oifname @wan_devices accept") {
+		t.Error("expected VPN→WAN forward rule")
+	}
+
+	// VPN clients should be able to forward to LAN.
+	if !strings.Contains(content, "iifname wg0 oifname @lan_devices accept") {
+		t.Error("expected VPN→LAN forward rule")
+	}
+}
+
+func TestRenderNftables_WireGuardDisabled_NoVPNRules(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.VPN.WireGuard.Enabled = false
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	if strings.Contains(content, "chain input_vpn") {
+		t.Error("VPN disabled should not have input_vpn chain")
+	}
+	if strings.Contains(content, "iifname wg0") {
+		t.Error("VPN disabled should not have any wg0 rules")
+	}
+}
+
 func TestRenderNftables_WireGuardCustomPort(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()

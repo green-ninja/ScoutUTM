@@ -33,6 +33,11 @@ table inet scout {
 {{- end}}
 {{- end}}
 {{- end}}
+{{- if .VPN.Enabled}}
+		# Redirect DNS from VPN clients to local resolver.
+		iifname wg0 udp dport 53 redirect
+		iifname wg0 tcp dport 53 redirect
+{{- end}}
 {{- range $i, $pf := .PortForwards}}
 		# Port forward: {{$pf.Name}}
 		iifname @wan_devices {{$pf.Proto}} dport {{$pf.SrcPort}} dnat to {{$pf.DestIP}}:{{$pf.DestPort}}
@@ -49,6 +54,9 @@ table inet scout {
 {{- if $ifaces}}
 		iifname @{{.Name}}_devices jump input_{{.Name}}
 {{- end}}
+{{- end}}
+{{- if .VPN.Enabled}}
+		iifname wg0 jump input_vpn
 {{- end}}
 	}
 {{range .Zones}}
@@ -79,12 +87,37 @@ table inet scout {
 	}
 {{- end}}
 {{- end}}
+{{- if .VPN.Enabled}}
+
+	chain input_vpn {
+		# Allow DNS, ICMP, NTP, HTTPS from VPN clients.
+		tcp dport 53 accept
+		udp dport 53 accept
+		icmp type echo-request accept
+		udp dport 123 accept
+		tcp dport 443 accept
+		accept
+	}
+{{- end}}
+
 	chain forward {
 		type filter hook forward priority filter; policy drop;
 
 		ct state established,related accept
 {{- if and .IDS.Enabled (eq .IDS.Mode "ips")}}
 		jump ips
+{{- end}}
+{{- if .VPN.Enabled}}
+		# Allow VPN clients to reach LAN and WAN.
+		iifname wg0 oifname @wan_devices accept
+{{- range .Zones}}
+{{- if ne .Name "wan"}}
+{{- $ifaces := index $.ZoneInterfaces .Name}}
+{{- if $ifaces}}
+		iifname wg0 oifname @{{.Name}}_devices accept
+{{- end}}
+{{- end}}
+{{- end}}
 {{- end}}
 {{- range .Forwardings}}
 {{- $src_ifaces := index $.ZoneInterfaces .Src}}

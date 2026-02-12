@@ -120,8 +120,9 @@ func affectedDaemons(old, new *config.Config) []string {
 		daemons = append(daemons, "dnsmasq")
 	}
 
-	// chrony: affected by NTP server changes.
-	if !reflect.DeepEqual(old.System.NTPServers, new.System.NTPServers) {
+	// chrony: affected by NTP server changes or network changes (allow list includes VLAN subnets).
+	if !reflect.DeepEqual(old.System.NTPServers, new.System.NTPServers) ||
+		!reflect.DeepEqual(old.Network, new.Network) {
 		daemons = append(daemons, "chrony")
 	}
 
