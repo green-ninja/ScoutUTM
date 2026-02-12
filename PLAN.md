@@ -1,7 +1,9 @@
 # ScoutOS Technical Architecture Plan
 
-> Version 0.8 | Created: 2026-02-11 | Updated: 2026-02-12 | Status: Draft
+> Version 0.9 | Created: 2026-02-11 | Updated: 2026-02-12 | Status: Draft
 
+> **v0.9 changes:** Addressed remaining risk analysis. (1) Elevated Suricata throughput to highest-priority technical risk -- added explicit "throughput-defines-SKU" rule: no marketing throughput claims until Month 10 hardware benchmarks are complete, benchmark results define product specs (5.4). (2) Added 7-step hardware benchmark go/no-go gate protocol (5.4). (3) Added dm-verity for v1.0 rootfs integrity -- Merkle tree hash verification on every SquashFS block read, built into initramfs (10.10). (4) Replaced Secure Boot section with versioned integrity roadmap: v1.0 = signed OTA + dm-verity + read-only rootfs, v1.5 = full UEFI Secure Boot chain (10.10). (5) Added post-launch operational sustainability program with maintenance cadences, security update pipeline (72h critical CVE response), sustainability risks, and solo founder capacity planning (16). (6) Added cryptsetup/veritysetup to Alpine packages (8.3).
+>
 > **v0.8 changes:** Addressed engineering review (13-point technical analysis). (1) Documented musl libc allocator risk for Suricata multi-threading -- added jemalloc/mimalloc LD_PRELOAD as benchmark-gated mitigation, integrated into Month 5/10 benchmarks (5.4). (2) Noted musl DNS resolver irrelevance -- Unbound and Go's pure resolver sidestep musl's resolver limitations (5.5). (3) Added ext4 vs F2FS rationale -- NVMe has hardware FTL, F2FS unnecessary (7.1). (4) Added hardware watchdog section with `watchdog` package and Suricata thread priority tuning via SCHED_FIFO (10.9). (5) Added Secure Boot analysis -- deferred to v1.5 due to Alpine's lack of out-of-box shim/signed GRUB, documented path forward (10.10). (6) Added TPM 2.0 feasibility note -- deferred to v1.5, Alpine has tpm2-tools (10.11). (7) Added SBOM generation (syft/CycloneDX) in CI and GPL source distribution compliance as mandatory build steps (10.12). (8) Added DPDK, QAT, Secure Boot, TPM to deferred scope table (14). (9) Added new risks: musl allocator contention, Secure Boot on Alpine, QAT integration, GPL/SBOM compliance (15). (10) Documented Alpine vs OpenWrt strategic rationale (1).
 >
 > **v0.7 changes:** Addressed CTO/reviewer feedback round 2. (1) Adopted IDS-only as v1 default -- IPS is opt-in with throughput warning; eliminates late-discovery performance risk (5.4). (2) Added comprehensive rollback test plan with 10 specific scenarios scheduled across Months 2-9, plus "Reset to Previous Config" UI button (4.4). (3) Hardened RAUC ESP extraction with atomic temp-file-then-rename pattern and added GRUB rescue boot entry that always boots last-known-good slot (7.1). (4) Detailed integration test suite with 11 named scripts and what each covers, when each is added, and stress test with nmap alert storm (12.2). (5) Added WebSocket alert broadcast rate limiting at 10 alerts/sec per client (6.3). (6) Added fake-hwclock for RTC-less SBCs and scoutd time sanity check to handle boot-before-NTP-sync window (5.6). (7) Added Vue.js bundle size strategy: lazy-load routes, uPlot, CI size monitoring (6.5).
@@ -134,7 +136,7 @@ Internet
     v
 +---+-------------------+
 | nftables FORWARD      |  Zone-based policy (WAN->LAN, etc.)
-| (inet scout table)    |  Conntrack, rate limiting, GeoIP sets
+| (inet scout table)    |  Conntrack, rate limiting
 +---+-------------------+
     |
     v
@@ -259,6 +261,8 @@ scoutd/
 │   ├── auth/                       # Authentication
 │   │   ├── session.go              # Token management (in-memory)
 │   │   └── password.go             # bcrypt hashing
+│   ├── scheduler/                  # Internal task scheduler
+│   │   └── scheduler.go            # Goroutine-based tick loop, registered tasks
 │   └── netmon/                     # Network monitoring
 │       ├── arp.go                  # ARP table scanning
 │       ├── dhcp.go                 # DHCP lease parsing
@@ -319,6 +323,39 @@ OpenRC default runlevel:
 
 **dnsmasq reload note:** dnsmasq has no graceful reload -- it requires a full restart. During restart (~100ms), new DHCP requests will fail. Existing clients are unaffected (leases are cached client-side). dnsmasq reads its lease file on startup, so lease state survives the restart. DHCP config changes (subnet, range, static assignments) are infrequent operations, so the brief interruption is acceptable. The UI should warn: "Applying DHCP changes requires a brief service restart."
 
+### 3.6 Internal Scheduler
+
+ScoutOS runs no external scheduler (no cron -- see section 10.2). All periodic tasks are managed by scoutd's internal scheduler, a goroutine-based tick loop in `internal/scheduler/scheduler.go`.
+
+**Design:** On startup, scoutd registers all scheduled tasks with their intervals. A single goroutine runs a `time.Ticker` loop, checking each task's next-run time on every tick (60-second resolution). Tasks run as goroutines so a slow task (e.g., GeoIP download) does not block others. Each task logs its start/completion and any errors to scoutd.log.
+
+```go
+type Task struct {
+    Name     string
+    Interval time.Duration     // e.g., 24 * time.Hour
+    RunAt    string            // optional: "03:00" for daily-at-time tasks
+    Fn       func(ctx context.Context) error
+}
+```
+
+**Registered scheduled tasks:**
+
+| Task | Interval | Default Time | What It Does |
+|------|----------|-------------|--------------|
+| `suricata-update` | Daily | 03:00 | Runs `suricata-update` to fetch latest ET Open rules, then `suricatasc -c reload-rules` |
+| `dns-blocklist-update` | Daily | 03:30 | Downloads latest RPZ blocklist files, writes to `/var/lib/scout/blocklists/`, runs `unbound-control reload` |
+| `ota-check` | Daily | 04:00 | GETs `manifest.json` from update server (see 7.5), notifies user if update available |
+| `log-rotate` | Hourly | :00 | Checks size of scoutd.log, eve.json, dns-query.log; rotates if over limit (see 10.7) |
+| `fake-hwclock-save` | Hourly | :30 | Writes current time to `/etc/scout/fake-hwclock.data` for RTC-less boot recovery |
+| `parental-schedule-check` | Every 60s | -- | Evaluates parental control schedules against current time; enables/disables per-device DNS filtering profiles by updating Unbound access-control and reloading |
+| `disk-check` | Hourly | :15 | Checks `/data` partition usage via `statvfs`. Warns at 90%. At 95%, prunes oldest rotated logs (eve.json.*, dns-query.log.*) to reclaim space |
+
+**Disk space monitoring detail:** The `disk-check` task calls Go's `syscall.Statvfs` on `/data` to get usage percentage. If usage exceeds 90%, it logs a warning visible in the dashboard system log. If usage exceeds 95%, it auto-prunes the oldest rotated Suricata EVE and DNS query log files (oldest first) until usage drops below 90% or no rotated logs remain. NVMe SMART health monitoring deferred to Phase 2 (requires `smartmontools` package and NVMe-specific parsing).
+
+**Parental schedule enforcement detail:** The `parental-schedule-check` task runs every 60 seconds. It reads the current time and each device's assigned parental profile schedule from config. If a device's schedule says "block internet 21:00-07:00" and the current time is 21:01, the task updates Unbound's configuration to apply the restrictive RPZ zone for that device's source IP and triggers `unbound-control reload`. When the schedule window ends (07:01), the next check removes the restriction. The 60-second resolution means enforcement is accurate to ±1 minute, which is acceptable for bedtime schedules.
+
+**Staggered timing:** Daily tasks are spread across the 03:00-04:00 window to avoid simultaneous network activity and CPU load. All daily tasks run in the early morning when network usage is lowest.
+
 ---
 
 ## 4. Configuration Management
@@ -347,18 +384,46 @@ type Config struct {
 
 - **SystemConfig**: `hostname`, `timezone`, `admin_hash` (bcrypt), `setup_done`, `language`, `ntp_servers[]` (default: `["pool.ntp.org"]`)
 - **NetworkConfig**: `interfaces[]` (name, zone, type, ipv4 mode/address), `zones[]` (name, input/forward/output policy, masquerade), `vlans[]` (id, parent, subnet, dhcp_range)
-- **FirewallConfig**: `forwardings[]` (src→dest zone), `rules[]` (custom rules with src/dest/proto/port/action), `port_forwards[]`, `geoip_block[]`
+- **FirewallConfig**: `forwardings[]` (src→dest zone), `rules[]` (custom rules with src/dest/proto/port/action), `port_forwards[]`
 - **DNSConfig**: `upstream[]`, `use_dot`, `use_doh`, `block_malware`, `block_phishing`, `block_ads`, `custom_block[]`, `custom_allow[]`
-- **VPNConfig → WireGuard**: `enabled`, `listen_port`, `private_key`, `key_created_at` (ISO 8601), `address`, `peers[]` (name, public_key, allowed_ips)
+- **VPNConfig → WireGuard**: `enabled`, `listen_port` (default: 51820), `private_key`, `key_created_at` (ISO 8601), `address` (default: `10.0.0.1/24`), `tunnel_subnet` (default: `10.0.0.0/24`), `peers[]` (name, public_key, allowed_ips, tunnel_ip), `endpoint_override` (optional: manual endpoint if WAN IP detection is unreliable)
+
+**WireGuard peer management and QR code generation:**
+
+The WireGuard server listens on `udp/51820` on the WAN interface. The tunnel subnet defaults to `10.0.0.0/24` — the server is `10.0.0.1`, and clients are allocated sequentially (`10.0.0.2`, `.3`, etc.) as peers are added. scoutd tracks allocated IPs to prevent collisions.
+
+When a user adds a peer via the dashboard (`POST /api/v1/vpn/wireguard/peers`), scoutd:
+1. Generates a client keypair (private + public key)
+2. Allocates the next available tunnel IP from the subnet
+3. Builds a standard WireGuard client config:
+   ```ini
+   [Interface]
+   PrivateKey = <generated client private key>
+   Address = 10.0.0.2/32
+   DNS = 192.168.1.1   # ScoutUTM LAN IP -- routes DNS through Unbound
+
+   [Peer]
+   PublicKey = <server public key>
+   Endpoint = <WAN IP>:51820
+   AllowedIPs = 0.0.0.0/0   # Full tunnel (all traffic through home network)
+   ```
+4. Encodes the config as a QR code (displayed in the dashboard, scannable by the WireGuard mobile app)
+5. The client private key is shown once (for QR/download) and then discarded — only the client public key is stored in config.json
+
+**Server endpoint:** Uses the current WAN IP (from `udhcpc` lease on eth0) at the time of peer config generation. The dashboard warns: "Your VPN endpoint is set to your current WAN IP. If your ISP changes your IP address, VPN clients will need updated configs. Consider requesting a static IP from your ISP." The `endpoint_override` field allows the user to manually set a hostname or IP if they have a DDNS service configured outside of ScoutOS (DDNS is not in v1 scope).
+
+**AllowedIPs options:** The dashboard offers two modes when creating a peer:
+- **Full tunnel** (`AllowedIPs = 0.0.0.0/0`): All client traffic routes through ScoutUTM. Provides full DNS filtering and firewall protection remotely.
+- **Split tunnel** (`AllowedIPs = 192.168.1.0/24, 10.0.0.0/24`): Only home network traffic routes through ScoutUTM. Internet traffic uses the client's local connection.
 - **IDSConfig**: `enabled`, `mode` (ids/ips), `rulesets[]`, `home_net[]`, `suppressed[]` (SIDs)
 - **ParentalConfig**: `profiles[]` (block_categories, safe_search, youtube_restricted, schedule), `devices[]` (mac → profile_id)
 - **UpdateConfig**: `auto_check`, `auto_install`, `channel`, `server_url`
 
-### 4.3 Two-Phase Config Commit
+### 4.3 Three-Phase Config Commit
 
 The original plan saved config.json before applying daemon changes. Problem: if the daemon reload fails (e.g., nftables rejects a rule), the config file already contains the bad state. This creates a divergence between config-on-disk and running-state.
 
-ScoutOS uses a **two-phase commit** with a pending file:
+ScoutOS uses a **three-phase commit** with a pending file:
 
 **Phase 1: Stage** -- write the proposed config to `config.json.pending`
 **Phase 2: Apply** -- render templates, reload daemons, test
@@ -384,12 +449,12 @@ When a user changes something (e.g., adds a firewall rule):
  4. STAGE: Write validated config to config.json.pending (atomic)
  5. Determine which daemons are affected (in this case: nftables)
 
---- PHASE A: Write all config files (no service disruption yet) ---
+--- PHASE 2a: Write all config files (no service disruption yet) ---
  6. Render ALL affected templates from the PENDING config
  7. Write ALL daemon config files atomically (write-tmp-rename)
     (e.g., /etc/nftables.conf.new, then rename to /etc/nftables.conf)
 
---- PHASE B: Reload all daemons (brief mixed-state window) ---
+--- PHASE 2b: Reload all daemons (brief mixed-state window) ---
  8. Reload daemons in dependency order:
       nftables → dnsmasq → unbound → suricata → wireguard
     Each reload: execute, check exit code, verify service is running.
@@ -413,9 +478,9 @@ ON FAILURE (any daemon reload fails):
 
 **Race condition acknowledgment:** During Phase B, there is a brief window where some daemons are running the new config while others still have the old config (e.g., nftables reloaded but Unbound hasn't yet). This window is typically <1 second for a single-daemon change, up to ~3 seconds if all daemons need reloading. This is an inherent limitation of managing multiple independent daemons -- there is no atomic "reload everything at once" primitive in Linux.
 
-**Why the two-phase (write-then-reload) approach minimizes risk:**
-- **Phase A (write all files) is non-disruptive.** Writing config files changes nothing until daemons reload. If scoutd crashes during Phase A, daemons continue running with their old configs. On restart, scoutd finds the pending file, deletes it, and re-applies from live -- the system self-heals.
-- **Phase B (reload all) is the smallest possible mixed-state window.** By writing ALL files first, we avoid the old pattern of "write + reload daemon A, then write + reload daemon B" which doubles the mixed-state duration. Now the window is only the serial reload time, not write+reload per daemon.
+**Why the write-then-reload approach minimizes risk:**
+- **Phase 2a (write all files) is non-disruptive.** Writing config files changes nothing until daemons reload. If scoutd crashes during Phase 2a, daemons continue running with their old configs. On restart, scoutd finds the pending file, deletes it, and re-applies from live -- the system self-heals.
+- **Phase 2b (reload all) is the smallest possible mixed-state window.** By writing ALL files first, we avoid the old pattern of "write + reload daemon A, then write + reload daemon B" which doubles the mixed-state duration. Now the window is only the serial reload time, not write+reload per daemon.
 - **Dependency order matters.** nftables first (firewall is the foundation), then DNS/DHCP (dependent services), then IDS (inspects traffic shaped by nftables). This order ensures no transient security gap (firewall is always updated before services that depend on it).
 
 **Why this matters:** The live config.json ALWAYS reflects the actual running state of the system. If scoutd crashes mid-apply, on restart it sees config.json (last known good) and the presence of config.json.pending (incomplete apply). It deletes the pending file and re-applies from the live config -- the system self-heals.
@@ -434,7 +499,7 @@ func (s *Store) RecoverIfNeeded() error {
 }
 ```
 
-**Rollback testing plan (Months 3-8, in Vagrant VM):**
+**Rollback testing plan (Months 2-9, in Vagrant VM):**
 
 Config rollback is a critical safety mechanism. It must be tested systematically, not just when something happens to break:
 
@@ -449,7 +514,68 @@ Config rollback is a critical safety mechanism. It must be tested systematically
 
 Each scenario is a shell script in `tests/rollback_test.sh` that runs in the Vagrant VM. These tests are part of the integration test suite and run at every milestone gate.
 
-**UI "Reset to Last Known Good" button:** The dashboard Settings page includes a "Reset to Previous Config" button that applies `config.json.bak` via the same two-phase commit flow. This gives users a one-click escape hatch if they lock themselves out of something (e.g., firewall rule blocks their own access to the dashboard). This is separate from the USB recovery mode -- it works from the web UI when the user can still reach it.
+**UI "Reset to Last Known Good" button:** The dashboard Settings page includes a "Reset to Previous Config" button that applies `config.json.bak` via the same three-phase commit flow. This gives users a one-click escape hatch if they lock themselves out of something (e.g., firewall rule blocks their own access to the dashboard). This is separate from the USB recovery mode -- it works from the web UI when the user can still reach it.
+
+### 4.5 Config Schema Migration and OTA Rollback
+
+Config schema versions change across firmware releases (e.g., new fields, restructured sections). Migration must be safe across OTA updates and rollbacks.
+
+**When migration runs:** Config migration runs **on first boot of new firmware**, not during OTA install. The RAUC bundle only writes the SquashFS to the inactive slot -- it does not touch the config partition. When the device reboots into the new slot, scoutd starts and handles migration.
+
+**Migration flow on startup:**
+
+```go
+func (s *Store) MigrateIfNeeded() error {
+    cfg := s.Load()
+    expected := CurrentSchemaVersion  // compiled into this firmware's scoutd
+
+    if cfg.Version == expected {
+        return nil  // no migration needed
+    }
+
+    if cfg.Version > expected {
+        // Config is from a NEWER firmware -- we're running after an OTA rollback
+        log.Warn("Config version %d is newer than firmware expects %d -- restoring pre-migrate backup", cfg.Version, expected)
+        return s.RestorePreMigrate()
+    }
+
+    // Config is older -- migrate forward
+    // 1. Save pre-migration backup
+    copyFile(s.configPath, s.preMigratePath)  // config.json → config.json.pre-migrate
+
+    // 2. Run migration functions sequentially: v3→v4, v4→v5, etc.
+    for v := cfg.Version; v < expected; v++ {
+        if err := migrations[v](cfg); err != nil {
+            // Migration failed -- restore pre-migrate backup
+            log.Error("Migration v%d→v%d failed: %v -- restoring backup", v, v+1, err)
+            return s.RestorePreMigrate()
+        }
+    }
+
+    // 3. Save migrated config
+    cfg.Version = expected
+    return s.Save(cfg)
+}
+```
+
+**Files involved:**
+
+| File | Purpose |
+|------|---------|
+| `config.json` | Live config (migrated to current firmware's schema version) |
+| `config.json.bak` | Previous config (one-step rollback for user config changes) |
+| `config.json.pre-migrate` | Config snapshot from before the last schema migration. Used to restore when OTA rolls back to older firmware. |
+
+**OTA rollback scenario:**
+1. Device runs firmware v1.0 with config version 3
+2. OTA installs firmware v1.1 to inactive slot, device reboots
+3. New firmware's scoutd starts, migrates config from version 3 → 5, saves `config.json.pre-migrate` (version 3)
+4. Health check fails → GRUB rolls back to firmware v1.0
+5. Old firmware's scoutd starts, reads config version 5 -- higher than expected (3)
+6. scoutd detects version mismatch, restores `config.json.pre-migrate` (version 3)
+7. Device operates normally on old firmware with matching config
+
+**OTA health check addition:** The post-boot health check (section 7.4 step 5) includes: "config.json version matches firmware's expected schema version range." If the config version is outside the expected range after migration, the health check fails and triggers rollback.
 
 ---
 
@@ -469,6 +595,13 @@ Default zones created by the setup wizard:
 
 Users without a managed switch just use LAN (flat network) and can add VLANs later.
 
+**WAN DHCP client:** The WAN interface (eth0) obtains its IP via BusyBox `udhcpc`, Alpine's default DHCP client (included in BusyBox -- no extra package). This is configured via `/etc/network/interfaces`:
+```
+auto eth0
+iface eth0 inet dhcp
+```
+The `networking` OpenRC service in the boot runlevel brings up eth0 and runs `udhcpc` to obtain an IP, gateway, and DNS from the ISP. scoutd renders `/etc/network/interfaces` from the central config (supporting future static WAN IP configuration via the UI).
+
 ### 5.2 VLAN Topology
 
 ```
@@ -485,12 +618,13 @@ eth1 (LAN trunk) ── Managed Switch
 Single table `inet scout` (handles IPv4 + IPv6). Key features:
 
 - **Named sets** for zone interfaces (e.g., `set lan_devices { type ifname; elements = { eth1 } }`)
-- **IP sets** for blocklists and GeoIP blocking (populated at runtime by scoutd)
+- **IP sets** for blocklists (populated at runtime by scoutd; GeoIP sets added in Phase 2)
 - **Per-zone input chains** (input_wan, input_lan, input_iot, etc.)
 - **Zone forwarding rules** in the forward chain
 - **DNS redirect** in prerouting: forces all LAN DNS queries through Unbound (prevents devices bypassing filtering with hardcoded DNS like 8.8.8.8)
 - **IPS chain** queues to Suricata NFQUEUE 0-3 (one per CPU core, Intel N97 has 4 cores) with `fanout,bypass` flags
 - **Masquerade** in postrouting for NAT on WAN-bound traffic
+- **IPv6 drop-all** in prerouting at highest priority: `meta nfproto ipv6 drop`. v1 is IPv4-only -- without this rule, the `inet` table would pass IPv6 traffic through with no policy applied, creating an unfiltered path around the firewall on ISPs that assign IPv6. This rule ensures IPv6 is blocked at the earliest possible hook point. IPv6 dual-stack support is planned for v2.0.
 
 ### 5.4 Suricata IDS/IPS
 
@@ -508,6 +642,16 @@ Rationale: ScoutUTM IS the router. AF_PACKET inline requires a transparent bridg
 
 These are conservative estimates based on real-world Suricata NFQUEUE deployments with moderate rulesets (~20K rules). The N97's 4 cores at 3.6GHz boost help, but AES-NI is irrelevant for IDS (it helps VPN, not packet inspection). **Do not market ScoutUTM as a "2.5 Gbps IDS/IPS appliance."** Market it as "2.5 Gbps firewall with IDS/IPS" and let throughput expectations be set honestly.
 
+**THIS IS THE HIGHEST TECHNICAL RISK IN THE PROJECT.** If IPS caps at 800-1200 Mbps on hardware and we've marketed "2.5 Gbps IPS", credibility is destroyed. The throughput numbers from Month 10 hardware benchmarks define the product SKU -- not the other way around. No throughput claim appears on the website, packaging, or GTM materials until hardware benchmarks are complete and verified.
+
+**Throughput-defines-SKU rule:**
+- The benchmark results from Month 10 become the official product specifications
+- If IPS delivers 900 Mbps, the product page says "up to 900 Mbps IPS throughput" -- not 1 Gbps, not 1.5 Gbps
+- If IDS delivers 1.5 Gbps, the product page says "up to 1.5 Gbps IDS throughput"
+- Firewall-only throughput (2.5 Gbps) is stated separately as "2.5 Gbps firewall throughput"
+- All throughput claims include test conditions: ruleset size, traffic profile, measurement tool
+- GTM.md must not be finalized until Month 10 benchmark data is available
+
 **v1 ships IDS-only by default. IPS is opt-in.**
 
 Real hardware throughput numbers won't be known until Month 10 (after hardware purchase). Rather than building the product around an assumption about IPS performance, v1 defaults to **IDS mode** (alert-only, no inline blocking). IDS has significantly lower per-packet overhead (1.5-2.0 Gbps vs 1.0-1.5 Gbps) and zero risk of Suricata becoming a bottleneck.
@@ -522,7 +666,16 @@ Users who want inline blocking can enable **IPS mode** via the dashboard, with a
 
 **Benchmark plan (two phases):**
 1. **VM benchmark (Month 5, during Suricata integration):** Run Suricata NFQUEUE in the Vagrant VM with iperf3 between the scout VM and client VM. VM throughput will be lower than bare metal (virtual NICs, hypervisor overhead), but this validates the NFQUEUE pipeline, per-queue fanout, rule loading, and eve.json alert flow. Any architectural issues (queue drops, Suricata config problems, fail-open behavior) surface here.
-2. **Hardware benchmark (Month 10, after hardware purchase):** Run the same tests on Odroid H4+ with real Intel I226-V NICs and iperf3 through the physical box. This produces the actual throughput numbers for documentation. If IPS throughput exceeds 1.2 Gbps, consider making IPS the default in a future release.
+2. **Hardware benchmark (Month 10, after hardware purchase):** Run the same tests on Odroid H4+ with real Intel I226-V NICs and iperf3 through the physical box. This produces the actual throughput numbers for documentation and marketing. If IPS throughput exceeds 1.2 Gbps, consider making IPS the default in a future release.
+
+**Benchmark go/no-go gate (Month 10):** The hardware benchmark is a hard gate before any public throughput claims. The benchmark protocol:
+1. iperf3 TCP throughput through the box (client → ScoutUTM → server) at each mode (firewall-only, IDS, IPS)
+2. Each test run for 60 seconds, repeated 5 times, median reported
+3. Tested with ET Open ruleset (~20K rules) at default settings
+4. Tested with and without jemalloc LD_PRELOAD
+5. Results documented in a benchmark report with exact versions (kernel, Suricata, ruleset date)
+6. Benchmark report reviewed before any marketing copy references throughput numbers
+7. If IPS throughput is below 800 Mbps, IPS mode gets a stronger dashboard warning and GTM materials position ScoutUTM as an IDS appliance with optional IPS
 
 **Musl allocator risk:** Alpine's musl libc uses a simple memory allocator with per-arena locks. Under heavy multi-threaded workloads (Suricata runs 4+ packet processing threads), musl's malloc can suffer severe futex contention -- benchmarks show up to 7x slowdown vs glibc's malloc in thread-heavy servers. This is a real risk for IPS mode where every packet path allocates memory.
 
@@ -591,7 +744,109 @@ This is the same pattern used by Pi-hole, AdGuard Home, and most professional DN
 
 No ScoutOS component relies on musl's `getaddrinfo()` for DNS resolution in production.
 
-### 5.6 NTP: chrony
+### 5.6 Per-Device DNS Filtering (Parental Controls)
+
+Parental controls require per-device DNS filtering: a child's device blocks TikTok while an adult's allows it. This uses Unbound's native `access-control-tag` feature (available since Unbound 1.9) -- no DNS proxy in scoutd, no multiple Unbound instances.
+
+**How it works:**
+
+1. Each parental profile (child, teen, adult) maps to a **tag** in Unbound (e.g., `"child"`, `"teen"`)
+2. Each tagged profile has associated RPZ zones (e.g., the `rpz-kids-block` zone applies only to queries tagged `"child"`)
+3. Devices are mapped to tags by their source IP via `access-control-tag`
+4. scoutd renders the Unbound config with the correct tag mappings whenever parental profiles or device assignments change
+
+**Unbound config example (rendered by scoutd):**
+```
+# Tag definitions -- one per parental profile
+define-tag: "child teen"
+
+# Per-device IP → tag mapping
+access-control-tag: 192.168.1.50/32 "child"
+access-control-tag: 192.168.1.51/32 "teen"
+# Devices with no tag get the default (no filtering beyond global malware/phishing RPZ)
+
+# RPZ zones with tag restrictions
+rpz:
+    name: "rpz-kids-block"
+    zonefile: "/var/lib/scout/blocklists/rpz-kids.zone"
+    tags: "child"
+    # Only applied to queries from IPs tagged "child"
+
+rpz:
+    name: "rpz-teen-block"
+    zonefile: "/var/lib/scout/blocklists/rpz-teen.zone"
+    tags: "child teen"
+    # Applied to both child and teen
+
+rpz:
+    name: "rpz-malware"
+    zonefile: "/var/lib/scout/blocklists/rpz-malware.zone"
+    # No tags = applied to ALL queries (global)
+```
+
+**Automatic static DHCP reservations:** When a device is assigned to a parental profile, scoutd automatically creates a static DHCP reservation in dnsmasq for that device's MAC address, pinning it to a fixed IP from the zone's DHCP range. This ensures the Unbound `access-control-tag` mapping is stable across lease renewals. The user never manually configures static IPs -- it happens behind the scenes.
+
+**Flow when a parent assigns a device to a profile:**
+1. Parent selects "Timmy's iPad" → "Child" profile in the UI
+2. scoutd looks up the device's MAC address (from ARP/DHCP lease tracking)
+3. scoutd assigns a static IP from the device's zone DHCP range (or keeps its current IP)
+4. scoutd updates dnsmasq config with the static reservation (MAC → fixed IP)
+5. scoutd updates Unbound config with `access-control-tag` mapping (fixed IP → profile tag)
+6. dnsmasq and Unbound are reloaded via the standard three-phase commit
+
+**Edge case -- device currently online with a different IP:** scoutd maps both the current dynamic IP and the new static reservation in Unbound immediately. The UI notes: "DNS filtering is active. The device will receive its permanent IP on next reconnect or lease renewal."
+
+**MAC address randomization handling:** Modern devices (iOS 14+, Android 10+, Windows 11) use per-network randomized MAC addresses by default. These randomized MACs are **stable per-network** -- the device uses the same random MAC every time it connects to the same network. scoutd identifies devices by whatever MAC they present, so stable random MACs work fine with static DHCP reservations.
+
+**Rotating MAC randomization** (opt-in on iOS as "Rotate Wi-Fi Address") changes the MAC periodically even on the same network, breaking all MAC-based identification. This is a known industry-wide limitation that affects every router. ScoutOS handles it as follows:
+- **Dashboard warning:** When a device is assigned to a parental profile, the UI shows: "For reliable parental controls, ensure this device does not rotate its Wi-Fi address. On iPhone: Settings → Wi-Fi → [network] → set Private Wi-Fi Address to Fixed."
+- **Detection:** If scoutd sees a known hostname appear with a new MAC while the previously-associated MAC disappears, it flags the device in the dashboard: "This device may be using rotating MAC addresses. Parental controls may not apply reliably."
+- This is documented as a known limitation (see section 14).
+
+**SafeSearch and YouTube restricted mode enforcement:**
+
+SafeSearch and YouTube restricted mode are enforced via DNS overrides in Unbound, applied through the same tag system as per-device filtering. When a parental profile has `safe_search: true` or `youtube_restricted: true`, scoutd renders additional Unbound `local-zone` entries for tagged devices:
+
+```
+# SafeSearch enforcement (applied to "child" and "teen" tagged devices)
+# Google: CNAME to forced safe search
+local-zone: "www.google.com" redirect
+local-data: "www.google.com CNAME forcesafesearch.google.com"
+local-zone-tag: "www.google.com" "child teen"
+
+# Bing: CNAME to strict mode
+local-zone: "www.bing.com" redirect
+local-data: "www.bing.com CNAME strict.bing.com"
+local-zone-tag: "www.bing.com" "child teen"
+
+# DuckDuckGo: CNAME to safe mode
+local-zone: "duckduckgo.com" redirect
+local-data: "duckduckgo.com CNAME safe.duckduckgo.com"
+local-zone-tag: "duckduckgo.com" "child teen"
+
+# YouTube restricted mode: CNAME to restricted endpoint
+local-zone: "www.youtube.com" redirect
+local-data: "www.youtube.com CNAME restrict.youtube.com"
+local-zone-tag: "www.youtube.com" "child teen"
+
+# YouTube mobile
+local-zone: "m.youtube.com" redirect
+local-data: "m.youtube.com CNAME restrict.youtube.com"
+local-zone-tag: "m.youtube.com" "child teen"
+
+# YouTube API (used by apps)
+local-zone: "youtube.googleapis.com" redirect
+local-data: "youtube.googleapis.com CNAME restrict.youtube.com"
+local-zone-tag: "youtube.googleapis.com" "child teen"
+```
+
+These are standard techniques used by Pi-hole, OpenDNS, CleanBrowsing, and every major parental control product. The DNS-level approach works across all browsers and apps on the device without requiring browser extensions or proxy configuration.
+
+**DNS-over-HTTPS (DoH) bypass mitigation:** Port 53 redirection prevents devices from using alternative DNS servers, but DoH (port 443) blends with normal HTTPS traffic and cannot be blocked by port. Partial mitigation: the parental RPZ blocklists include well-known DoH provider domains (`dns.google`, `cloudflare-dns.com`, `dns.quad9.net`, `doh.opendns.com`, `mozilla.cloudflare-dns.com`, `dns.nextdns.io`). When a child's device tries to use DoH, the DNS lookup for the DoH server itself is blocked by Unbound. This catches the most common DoH configurations (Firefox uses `mozilla.cloudflare-dns.com` by default).
+
+**Known limitation:** This does not catch DoH to IP addresses directly (no DNS lookup involved), custom DoH providers, or DoH configured via IP in browser settings. A technically sophisticated user can always bypass DNS-based filtering -- this is true of every DNS-based parental control product (Pi-hole, OpenDNS, CleanBrowsing, Firewalla). Full DoH blocking would require TLS inspection (MITM proxy), which is out of scope for v1 and raises significant privacy/trust concerns. See section 14.
+
+### 5.7 NTP: chrony
 
 Accurate time is essential for a security appliance:
 - **TLS certificate validation** (expiry checks fail with wrong time)
@@ -611,7 +866,7 @@ Configuration: scoutd renders `/etc/chrony/chrony.conf` from the central config.
 
 **Boot time edge case:** chronyd starts in the boot runlevel, but WAN may not be up yet (DHCP takes 1-3 seconds). This is fine -- chrony doesn't block boot. It starts, attempts NTP sync in the background, and retries with increasing intervals until WAN is available. The `iburst` option sends 4 rapid requests on first contact for fast convergence.
 
-**fake-hwclock fallback:** The Odroid H4+ (and most SBCs) has no battery-backed RTC. After power loss, the system clock resets to the kernel's compiled-in epoch. To avoid booting with a wildly wrong time (which breaks TLS and DNSSEC):
+**fake-hwclock fallback:** The Odroid H4+ likely has a battery-backed RTC (x86 boards with Intel SoCs typically include one -- verify during Month 10 hardware bring-up). Regardless, fake-hwclock is kept as a safety net for boards without RTC or if the RTC battery dies. After power loss without a functioning RTC, the system clock resets to the kernel's compiled-in epoch. To avoid booting with a wildly wrong time (which breaks TLS and DNSSEC):
 - Install `fake-hwclock` (`apk add fake-hwclock`), which saves the current time to `/etc/scout/fake-hwclock.data` every hour and at shutdown
 - On boot, `fake-hwclock` restores the last-saved time before chronyd starts -- the clock is at worst a few hours behind, not years
 - chronyd then corrects to real NTP time within seconds of WAN coming up
@@ -652,6 +907,7 @@ Self-signed TLS cert generated at first boot, stored in `/etc/scout/tls/`.
 
 | Endpoint Group | Methods | Purpose |
 |---------------|---------|---------|
+| `/api/v1/health` | GET | Unauthenticated. Returns `{"healthy": true, "uptime": 3600, "version": "1.0.0"}`. Same checks as OTA rollback health (7.3) |
 | `/api/v1/auth/login` | POST | Authenticate, get session token |
 | `/api/v1/system/*` | GET, PUT, POST | Status, settings, reboot, updates |
 | `/api/v1/network/*` | GET, PUT, POST, DELETE | Interfaces, zones, VLANs |
@@ -687,7 +943,9 @@ JSON messages over WSS. Client subscribes to topics. Server pushes:
 - Login returns random 256-bit session token
 - Token as `Authorization: Bearer <token>` header or `scout_session` cookie
 - Sessions expire after 24 hours of inactivity
+- **Session persistence:** Sessions are in-memory only — lost on scoutd restart or reboot. This is intentional: no session tokens are written to disk, reducing the attack surface. Config apply does NOT restart scoutd (scoutd stays running and reloads other daemons externally), so normal config changes do not log the user out. Sessions are only lost during OTA updates (reboot) or manual service restart. Users re-login after reboot — acceptable for a home appliance.
 - CSRF: SameSite=Strict cookies + origin checking
+- **Brute-force protection:** Per-IP rate limit of 5 failed login attempts per minute -- after 5 failures, the IP is blocked for 5 minutes. Global rate limit of 20 failed attempts per minute across all IPs (protects against distributed brute-force from multiple LAN devices). Implemented as in-memory counters with expiring buckets in `internal/auth/session.go`. Successful login resets the per-IP counter. Blocked attempts return HTTP 429 with `Retry-After` header.
 
 ### 6.5 Frontend (Vue.js 3 SPA)
 
@@ -713,7 +971,7 @@ JSON messages over WSS. Client subscribes to topics. Server pushes:
 
 Runs on first boot when `config.system.setup_done == false`:
 
-1. **Welcome + Language** -- set language preference
+1. **Welcome** -- branding, brief product intro
 2. **Admin Password** -- minimum 10 characters
 3. **Network Detection** -- auto-detect WAN (DHCP) and LAN interfaces
 4. **LAN Config** -- set IP range, enable/disable DHCP
@@ -750,6 +1008,8 @@ Runs on first boot when `config.system.setup_done == false`:
 
 **No separate boot partition.** The kernel (`vmlinuz`) and initramfs are stored inside each SquashFS rootfs image at `/boot/` within the SquashFS. OTA updates atomically replace the entire system -- kernel, initramfs, and rootfs -- as a single unit. No risk of kernel/rootfs version mismatch. No separate boot-a/boot-b partitions needed.
 
+**PARTUUID-based mounting.** The build system writes stable PARTUUIDs into the GPT table. The initramfs, GRUB config, and RAUC system.conf all reference partitions by `PARTUUID=` rather than `/dev/nvme0n1pN`. This is robust against device enumeration order changes. Hardcoded `/dev/nvme0n1pN` paths in this document are for readability only.
+
 **Boot loading strategy: ESP extraction, not SquashFS loopback.** GRUB's built-in SquashFS loopback support (`loopback sqfs (hd0,gpt2)`) exists since GRUB 2.06, but it's uncommon in production embedded systems and a boot failure here means a bricked device with no easy recovery path. Instead, the build system extracts the kernel and initramfs from each SquashFS to slot-specific subdirectories in the ESP:
 
 ```
@@ -768,7 +1028,7 @@ GRUB loads the kernel from the ESP natively (well-tested, standard UEFI path) ra
 
 ```
 # grub.cfg snippet for slot A (standard ESP loading, no loopback)
-linux /EFI/scout/slot-a/vmlinuz root=/dev/nvme0n1p2 rootfstype=squashfs ro rauc.slot=A
+linux /EFI/scout/slot-a/vmlinuz root=/dev/nvme0n1p2 rootfstype=squashfs ro rauc.slot=A console=tty0 console=ttyS0,115200n8
 initrd /EFI/scout/slot-a/initramfs
 ```
 
@@ -867,7 +1127,7 @@ RAUC handles:
 RAUC system config at `/etc/rauc/system.conf`:
 ```ini
 [system]
-compatible=ScoutUTM Scout
+compatible=scout-utm
 bootloader=grub
 grubenv=/boot/efi/EFI/scout/grubenv
 
@@ -889,7 +1149,7 @@ bootname=B
 
 ```
 1. scoutd checks update server (periodic or manual)
-   → GET https://update.scoututm.com/api/v1/check
+   → GET https://update.scoututm.com/manifest.json (see 7.5)
 
 2. Download RAUC bundle to /tmp (tmpfs), verify SHA-256
    → Progress pushed to UI via WebSocket
@@ -912,7 +1172,44 @@ bootname=B
 7. Health check fails after 3 attempts → GRUB falls back to previous slot
 ```
 
-### 7.5 Firmware Signing & Downgrade Protection
+### 7.5 OTA Update Server
+
+The update server is a static file host. No dynamic API, no device registry, no telemetry.
+
+**Infrastructure:** A self-hosted VPS (nginx or caddy) serving static files over HTTPS at `update.scoututm.com`. This is the same VPS budgeted under "domain + hosting + infra" (€500). The server holds RAUC bundles and a manifest file -- nothing else.
+
+**Manifest file:** `https://update.scoututm.com/manifest.json`
+
+```json
+{
+  "version": "1.0.1",
+  "bundle": "scout-1.0.1.raucb",
+  "sha256": "a1b2c3d4...",
+  "min_version": "1.0.0"
+}
+```
+
+**Update check flow:**
+1. scoutd periodically GETs `manifest.json` (interval configurable, default: daily)
+2. Compare `version` against running firmware version
+3. If newer and running version >= `min_version`, notify user (or auto-download if configured)
+4. Download bundle file from same server, verify SHA-256 matches manifest
+5. Pass bundle to RAUC for signature verification and installation (see 7.6)
+
+**Publishing workflow (manual):** Founder builds a signed RAUC bundle locally, then uploads via SCP or rsync:
+```sh
+scp build/scout-1.0.1.raucb update-server:/var/www/update.scoututm.com/
+# Update manifest.json with new version, filename, and sha256
+scp build/manifest.json update-server:/var/www/update.scoututm.com/
+```
+
+**No device authentication.** Devices are anonymous -- the server cannot distinguish one device from another. The manifest and bundle are public static files. Security is at the cryptographic layer: RAUC verifies the ECDSA P-256 signature on the bundle before installing. An attacker who compromises the update server can serve a malicious bundle, but RAUC will reject it because it lacks a valid signature.
+
+**No channels.** Beta testers receive a different `server_url` in their `UpdateConfig` pointing to a separate path or test server. No channel selection logic in the update client.
+
+**Availability:** If the update server is down, devices continue operating normally. scoutd logs the failed check and retries on the next interval. Manual OTA via USB is always available as a fallback.
+
+### 7.6 Firmware Signing & Downgrade Protection
 
 **Signing:** ECDSA P-256 keypair. Public cert baked into rootfs as `/etc/rauc/keyring.pem`. Private key on build machine only, never shipped on devices. Prevents MITM firmware injection and unofficial firmware.
 
@@ -939,8 +1236,9 @@ An attacker who obtains an old, validly-signed bundle cannot downgrade a device 
 make frontend    # Build Vue.js → static assets
 make scoutd      # Build Go binary (CGO_ENABLED=0, static, ldflags for version)
 make rootfs      # Alpine rootfs via alpine-make-rootfs + overlay + scoutd binary
-make squashfs    # Compress rootfs to SquashFS (zstd)
-make image       # Full disk image (GPT, partitions, GRUB, kernel, squashfs, config)
+make squashfs    # Compress rootfs to SquashFS (zstd) + dm-verity hash tree + root hash
+make initramfs   # Build initramfs with embedded dm-verity root hash
+make image       # Full disk image (GPT, partitions, GRUB, kernel, squashfs+verity, config)
 make bundle      # RAUC update bundle (signed)
 make clean       # Remove build artifacts
 ```
@@ -955,7 +1253,28 @@ make clean       # Remove build artifacts
 6. Remove unnecessary files (man pages, docs, apk cache)
 7. Create mount points for persistent partitions
 
-### 8.3 Alpine Packages
+### 8.3 SquashFS + dm-verity Build (make squashfs)
+
+1. Compress rootfs directory to SquashFS image with zstd compression:
+   ```sh
+   mksquashfs build/rootfs build/scout-rootfs.sqfs -comp zstd -Xcompression-level 19
+   ```
+2. Generate dm-verity hash tree and root hash:
+   ```sh
+   SQFS_SIZE=$(stat -c %s build/scout-rootfs.sqfs)
+   # Hash tree is appended after the SquashFS data in the same partition
+   veritysetup format build/scout-rootfs.sqfs build/scout-rootfs.sqfs \
+       --data-block-size=4096 --hash-offset="$SQFS_SIZE" \
+       | tee build/verity-output.txt
+   # Extract root hash and hash offset for initramfs embedding
+   grep "Root hash:" build/verity-output.txt | awk '{print $3}' > build/roothash.txt
+   echo "$SQFS_SIZE" > build/hashoffset.txt
+   ```
+3. The output is a single file (`scout-rootfs.sqfs`) containing SquashFS data followed by the verity hash tree. This file is written raw to the rootfs-a or rootfs-b partition (640MB, fits comfortably).
+
+The root hash from `build/roothash.txt` is embedded into the initramfs by `make initramfs` (see 8.6). The initramfs is then packed into the SquashFS for the RAUC bundle, creating a dependency chain: `make squashfs` → `make initramfs` → rebuild SquashFS with new initramfs → recalculate verity. In practice, the initramfs is built first with a placeholder hash, then updated after verity generation and repacked.
+
+### 8.4 Alpine Packages
 
 ```
 # Kernel
@@ -976,32 +1295,51 @@ openrc, busybox, alpine-baselayout, musl, e2fsprogs, squashfs-tools, grub-efi
 # Reliability
 watchdog, jemalloc
 
+# Integrity
+cryptsetup
+
 # OTA
 rauc
-
-# Compliance
-syft
 
 # TLS + Utils
 openssl, jq, curl, ca-certificates
 ```
 
-### 8.4 Disk Image Assembly (make-image.sh)
+### 8.5 Disk Image Assembly (make-image.sh)
 
 1. Create sparse image file (2GB -- data partition expands on first boot)
 2. GPT partition table (5 partitions per layout in 7.1)
 3. Format: ESP (vfat), config (ext4), data (ext4)
-4. Write SquashFS to rootfs-a partition (raw, no filesystem -- SquashFS IS the filesystem)
-5. Install GRUB to ESP, configure A/B boot with SquashFS loopback loading
-6. Write default config.json to config partition
-7. Compress image with zstd for distribution
+4. Write SquashFS + dm-verity hash tree to rootfs-a partition (raw -- SquashFS data followed by verity hash tree at the calculated offset)
+5. Install GRUB to ESP, configure A/B boot with ESP kernel extraction (see 7.1)
+6. Extract kernel + initramfs (with baked-in root hash) from SquashFS to ESP slot-a directory
+7. Write default config.json to config partition
+8. Compress image with zstd for distribution
 
-### 8.5 Custom initramfs
+### 8.6 Custom initramfs
 
-Handles the OverlayFS setup at boot:
+Handles dm-verity verification and OverlayFS setup at boot. The dm-verity root hash is embedded in the initramfs at build time by `make initramfs`.
 
+**Build step (`make initramfs`):**
+```sh
+# After 'make squashfs' produces the root hash:
+ROOTHASH=$(cat build/roothash.txt)
+HASHOFFSET=$(cat build/hashoffset.txt)
+
+# Substitute root hash and offset into the initramfs init script template
+sed "s/@ROOTHASH@/${ROOTHASH}/; s/@HASHOFFSET@/${HASHOFFSET}/" \
+    build/initramfs/init.template > build/initramfs/init
+
+# Pack initramfs (cpio + gzip)
+cd build/initramfs && find . | cpio -o -H newc | gzip > ../initramfs.img
 ```
-mount SquashFS rootfs → read-only /mnt/lower
+
+**Boot sequence in initramfs init script:**
+```
+# dm-verity: verify rootfs integrity before mounting
+veritysetup open /dev/nvme0n1pX scout-root /dev/nvme0n1pX "$ROOTHASH" \
+    --hash-offset="$HASHOFFSET"
+mount SquashFS via dm-verity → read-only /mnt/lower (/dev/mapper/scout-root)
 create tmpfs → /mnt/upper (volatile writes)
 mount OverlayFS → /mnt/root (lower=squashfs, upper=tmpfs)
 mount config partition → /mnt/root/etc/scout (persistent)
@@ -1025,7 +1363,7 @@ Type 'help' for available commands.
 / #
 ```
 
-This requires a keyboard + monitor (or serial console) connected to the Odroid H4+. The emergency shell includes `mount`, `fdisk`, `cat`, and other BusyBox utilities for diagnosis. This is a last-resort debug tool, not a normal user path.
+This requires a keyboard + monitor (or serial console) connected to the Odroid H4+. **Serial console:** 115200 baud, 8N1 (`ttyS0`). Kernel boot parameters include `console=tty0 console=ttyS0,115200n8` so kernel messages are available on both HDMI and serial. The emergency shell includes `mount`, `fdisk`, `cat`, and other BusyBox utilities for diagnosis. This is a last-resort debug tool, not a normal user path.
 
 **initramfs maintenance:** The initramfs script is pinned to specific partition UUIDs (set during image build) and tested against the exact Alpine LTS kernel version shipped in each release. The build system generates the initramfs as part of `make rootfs`, so it's always in sync with the kernel. Alpine LTS kernel upgrades (e.g., 6.6.x → 6.12.x) require initramfs re-testing as part of the OTA update QA process.
 
@@ -1153,7 +1491,8 @@ Everything outside the two persistent partitions is volatile (tmpfs overlay, los
 |------|----------|-----------|
 | `/etc/scout/config.json` | Central configuration (all settings) | Written by scoutd on every config change |
 | `/etc/scout/config.json.bak` | Previous config (one-step rollback) | Overwritten on each commit |
-| `/etc/scout/config.json.pending` | Staged config during two-phase commit | Transient -- deleted after commit or rollback |
+| `/etc/scout/config.json.pending` | Staged config during three-phase commit | Transient -- deleted after commit or rollback |
+| `/etc/scout/config.json.pre-migrate` | Config snapshot before last schema migration | Overwritten on each OTA migration, used for rollback (see 4.5) |
 | `/etc/scout/tls/server.crt` | Self-signed TLS certificate | Generated on first boot, valid 10 years. Regenerate via API if needed. |
 | `/etc/scout/tls/server.key` | TLS private key (0600) | Generated with cert. Never leaves device. |
 | `/etc/scout/tls/ca.crt` | (Future) Custom CA for client certs | Not used in v1 |
@@ -1167,7 +1506,6 @@ Everything outside the two persistent partitions is volatile (tmpfs overlay, los
 | `/var/lib/scout/suricata/eve.json` | Suricata alert/flow log | Rotated by scoutd | **7 days**, max 500MB. Oldest files deleted first. |
 | `/var/lib/scout/logs/scoutd.log` | scoutd application log | Rotated by scoutd | **7 days**, max 100MB |
 | `/var/lib/scout/logs/dns-query.log` | DNS query log (for parental reports) | Rotated by scoutd | **7 days**, max 200MB. See privacy note below. |
-| `/var/lib/scout/geoip/` | GeoIP database (MaxMind/DB-IP) | Updated monthly by scoutd | Overwritten on each update |
 | `/var/lib/scout/blocklists/` | DNS blocklist files (RPZ format) | Updated daily by scoutd | Overwritten on each update |
 | `/var/lib/scout/update/` | Temporary download location for OTA bundles | Cleaned after install | Deleted after successful or failed install |
 
@@ -1255,37 +1593,75 @@ pidfile = /var/run/suricata.pid
 
 ```sh
 # In /etc/init.d/suricata (OpenRC start function), after starting Suricata:
-# Set packet processing threads to SCHED_FIFO priority 50
+# Wait for Suricata to finish rule loading and spawn all threads.
+# Suricata spawns threads asynchronously during startup -- applying priorities
+# too early misses late-spawning packet processing threads.
+sleep 5
+# Set all Suricata threads to SCHED_FIFO priority 50
 for tid in $(ls /proc/$(cat /var/run/suricata.pid)/task/); do
     chrt -f -p 50 "$tid" 2>/dev/null || true
 done
+# Re-apply after 10 more seconds to catch any late-spawning threads
+(sleep 10 && for tid in $(ls /proc/$(cat /var/run/suricata.pid)/task/); do
+    chrt -f -p 50 "$tid" 2>/dev/null || true
+done) &
 ```
 
 This gives Suricata's threads real-time scheduling priority, ensuring they preempt normal processes. `SCHED_FIFO` priority 50 is above default processes (0) but below kernel threads and the watchdog. scoutd itself runs at normal priority -- it's not latency-sensitive (API responses of 10-50ms are fine).
 
 **Month 5 benchmark note:** Thread priority tuning is tested as part of the Suricata VM benchmark. The benchmark compares throughput with and without `SCHED_FIFO` to quantify the benefit.
 
-### 10.10 Secure Boot (Deferred to v1.5)
+### 10.10 Integrity and Secure Boot Roadmap
 
-**Status: Not implemented in v1.0.** Full UEFI Secure Boot on Alpine Linux is complex and not required for initial launch.
+ScoutOS takes a layered approach to system integrity, adding protections incrementally across releases. This roadmap is explicit so that customers, reviewers, and the team know exactly what is shipped and what is planned.
 
-**The challenge:** UEFI Secure Boot requires a signed chain from firmware → bootloader → kernel. The standard Linux approach uses a Microsoft-signed "shim" that chain-loads a distribution-signed GRUB, which chain-loads a signed kernel. Alpine Linux does not ship a signed shim or signed GRUB -- Alpine's own documentation acknowledges that stock GRUB does not work with Secure Boot out of the box. Implementing Secure Boot on Alpine requires:
+**v1.0: Signed OTA + dm-verity + read-only rootfs**
 
-1. Building and signing a custom shim with ScoutUTM's key
-2. Enrolling ScoutUTM's key in the device's UEFI key database (MOK)
-3. Signing the GRUB EFI binary with ScoutUTM's key
-4. Signing the Linux kernel (or using a signed kernel from Alpine edge)
-5. Locking down kernel module loading to signed modules only
+v1.0 ships with three integrity mechanisms that do not require UEFI Secure Boot:
 
-This is achievable but represents significant engineering effort and an ongoing maintenance burden (every kernel update requires re-signing).
+1. **Signed OTA bundles.** RAUC verifies ECDSA P-256 signatures on every firmware update. Only ScoutUTM-signed images can be installed. Downgrade protection via version monotonicity.
 
-**v1.0 security posture without Secure Boot:**
-- The root filesystem is read-only SquashFS -- an attacker cannot persist modified binaries across reboot
-- OTA bundles are ECDSA-signed and verified by RAUC -- only ScoutUTM-signed firmware can be installed
-- The config partition is mounted `noexec` -- no executable code on writable storage
-- Physical access is required to modify the bootloader (no remote exploit path to GRUB)
+2. **dm-verity for rootfs.** The SquashFS rootfs partition is protected by dm-verity -- a Linux kernel feature that computes a Merkle tree hash of every 4KB block and verifies them on read. If any block is tampered with (bit flip, deliberate modification), the kernel returns an I/O error instead of corrupted data.
 
-**Path to v1.5:** Secure Boot will be investigated after v1.0 ships, when the OTA pipeline is stable and there is bandwidth for bootloader chain-of-trust work. The approach will likely use shim + MOK enrollment, following the pattern established by other non-major distributions.
+   dm-verity integration:
+   - The build system (`make squashfs`) generates the SquashFS image, then runs `veritysetup format` to produce the hash tree and root hash
+   - The root hash is embedded in the initramfs (which is inside the signed RAUC bundle)
+   - At boot, the initramfs runs `veritysetup open` before mounting the SquashFS, passing the root hash
+   - The kernel verifies every block read from the SquashFS against the hash tree
+   - If verification fails, the kernel returns EIO -- the block cannot be read, and the system logs the corruption
+
+   ```sh
+   # In initramfs init script, before mounting SquashFS:
+   ROOTHASH="<baked-in-at-build-time>"
+   veritysetup open /dev/nvme0n1p2 scout-root /dev/nvme0n1p2 "$ROOTHASH" \
+       --hash-offset=<offset>
+   mount -t squashfs -o ro /dev/mapper/scout-root /mnt/lower
+   ```
+
+   dm-verity adds negligible performance overhead (hashes are cached after first read) and requires no hardware support. It catches both accidental corruption (bad blocks) and deliberate tampering.
+
+3. **Read-only SquashFS + noexec persistent partitions.** SquashFS is inherently immutable. Config and data partitions are mounted `noexec,nosuid,nodev`. tmpfs overlay is volatile.
+
+**v1.0 does NOT include UEFI Secure Boot.** The boot chain (UEFI → GRUB → kernel) is not cryptographically verified at boot time. An attacker with physical access could theoretically replace GRUB or the kernel on the ESP. However:
+- This requires physical access to the NVMe SSD (opening the case, removing the drive)
+- Once the kernel boots, dm-verity protects the rootfs from tampering
+- OTA updates are still signed -- a compromised bootloader cannot install unsigned firmware via the normal update path
+
+**v1.5: Full UEFI Secure Boot chain**
+
+Full chain-of-trust from firmware to kernel:
+
+1. **Custom shim** signed by ScoutUTM's key, enrolled via MOK (Machine Owner Key)
+2. **Signed GRUB EFI binary** verified by shim
+3. **Signed Linux kernel** verified by GRUB
+4. **Kernel module signing** -- only signed modules can be loaded (`CONFIG_MODULE_SIG_FORCE=y`)
+
+**The challenge:** Alpine Linux does not ship a signed shim or signed GRUB. Implementing Secure Boot on Alpine requires building and maintaining a custom signing pipeline. Every kernel update requires re-signing. This is achievable but represents ongoing maintenance burden.
+
+**Why this order is correct:**
+- dm-verity (v1.0) protects the most valuable target -- the rootfs containing all binaries and configuration templates. It works today, with zero hardware requirements.
+- Secure Boot (v1.5) closes the remaining gap -- the boot chain. It requires signing infrastructure, key management, and Alpine-specific workarounds that are better tackled after v1.0 stabilizes.
+- Together (v1.5), they provide a complete chain: UEFI verifies GRUB → GRUB verifies kernel → kernel + dm-verity verifies rootfs → RAUC verifies OTA updates.
 
 ### 10.11 TPM 2.0 (Deferred to v1.5)
 
@@ -1474,7 +1850,7 @@ echo "ScoutOS dev VM provisioned. Web UI at https://localhost:8443"
 - Suricata IDS/IPS in NFQUEUE mode
 - WireGuard VPN server
 - chrony NTP sync
-- Config two-phase commit with real daemon reloads
+- Config three-phase commit with real daemon reloads
 - Full boot-to-operational testing
 - OTA update flow (RAUC install to a disk image mounted in the VM)
 - Setup wizard end-to-end
@@ -1630,9 +2006,9 @@ The original 8-month estimate assumed no setbacks, no learning curves, and full-
 | **7** | Frontend (Remaining) | Setup wizard (7 steps), Devices view, IDS alerts view, Parental controls, Network/System settings views | |
 | **8** | Parental + Polish | Per-device parental profiles, schedules, safe search enforcement, DNS query logging, device fingerprinting | **Gate: Beta -- all features functional in Vagrant VM** |
 | **9** | Image build + OTA | SquashFS rootfs build, disk image assembly, GRUB A/B slot boot, custom initramfs with OverlayFS, ESP kernel extraction, RAUC integration, bundle signing, OTA update flow, downgrade protection -- all tested in QEMU VM first | |
-| **10** | Hardware bring-up | **Purchase Odroid H4+.** Flash production image, Alpine kernel + Intel I226-V NIC validation, Suricata hardware throughput benchmarks (iperf3), UEFI boot validation, USB recovery mode testing | **Gate: Release Candidate -- boots and passes QA on hardware** |
-| **11** | Hardware QA + Hardening | Full QA test suite on hardware, boot time optimization, thermal testing under sustained load, bug fixing, edge case hardening, performance tuning | |
-| **12** | Ship prep | Quick-start guide, production image pipeline, second Odroid H4+ for production image validation, beta tester onboarding (5-10 units), packaging | **Gate: v1.0 -- ready for beta testers** |
+| **10** | Hardware bring-up | **Purchase Odroid H4+.** Flash production image, Alpine kernel + Intel I226-V NIC validation, Suricata hardware throughput benchmarks (iperf3), UEFI boot validation, USB recovery mode testing. **Submit finished product (board + enclosure + firmware) for CE pre-compliance testing at EU test lab (~€3K).** | **Gate: Release Candidate -- boots and passes QA on hardware** |
+| **11** | Hardware QA + Hardening + CE | Full QA test suite on hardware, boot time optimization, thermal testing under sustained load, bug fixing, edge case hardening, performance tuning. **CE pre-compliance results received -- must pass before first sale.** | **Gate: CE pre-compliance pass** |
+| **12** | Ship prep | Quick-start guide, production image pipeline, second Odroid H4+ for production image validation, order first sales batch (25 units), assemble + flash + test + package | **Gate: v1.0 -- ready for beta testers** |
 
 **Key design principles:**
 - **No hardware until Month 10.** Months 1-8 are pure software development on the workstation and in VMs. The Alpha gate (Month 4) and Beta gate (Month 8) are both validated entirely in Vagrant VMs. This keeps the focus on building features, not debugging hardware.
@@ -1650,15 +2026,18 @@ These features are intentionally excluded from v1.0 to keep scope manageable for
 
 | Feature | v1 Status | Rationale | Target |
 |---------|-----------|-----------|--------|
-| **IPv6** | **Out of scope** | IPv4-only for v1. IPv6 support (SLAAC, DHCPv6, dual-stack firewall rules, IPv6 DNS) adds significant complexity to nftables templates, the zone model, and the setup wizard. Most home networks are IPv4-only or work fine with ISP-provided IPv6 passthrough. | v2.0 |
+| **IPv6** | **Out of scope** | IPv4-only for v1. All IPv6 traffic is explicitly dropped at the nftables prerouting hook (`meta nfproto ipv6 drop`) to prevent unfiltered IPv6 bypass on ISPs that assign IPv6. **Customers on IPv6-only or DS-Lite ISPs (common in Germany/France) cannot use ScoutUTM v1 — "IPv4 internet connection" is a system requirement.** IPv6 support (SLAAC, DHCPv6, dual-stack firewall rules, IPv6 DNS) adds significant complexity to nftables templates, the zone model, and the setup wizard. | v2.0 |
 | **Multi-WAN** | **Out of scope** | Single WAN (eth0) only. Multi-WAN failover and load balancing requires WAN health checking, policy routing, connection tracking migration, and complex nftables rules. The Odroid H4+ only has 2 NICs anyway -- multi-WAN would require a USB NIC. | v2.0 |
 | **Scheduled config backup** | **Out of scope** | No automatic backup to cloud/USB. Manual export via USB recovery mode and `GET /api/v1/system/backup` (returns config.json download) are the v1 options. Scheduled cloud sync adds cloud infrastructure dependency. | v1.5 |
 | **Mobile app** | **Out of scope** | Web UI is responsive/mobile-friendly via Tailwind CSS. Native iOS/Android apps deferred -- the web UI accessed via phone browser is the v1 mobile experience. | v2.0+ (Phase 4) |
 | **Custom DNS upstream per zone** | **Out of scope** | Single Unbound config serves all zones. Per-zone DNS upstreams (e.g., Kids zone uses family-safe resolvers) adds Unbound configuration complexity. Parental controls use RPZ blocklists instead, which is simpler and more effective. | v1.5 if needed |
+| **DoH bypass of DNS filtering** | **Known limitation** | DNS-over-HTTPS on port 443 cannot be blocked by port. Partial mitigation: well-known DoH provider domains are included in parental RPZ blocklists, catching common browser defaults. Direct-to-IP DoH or obscure providers bypass filtering. Full DoH blocking requires TLS inspection (MITM proxy) -- out of scope, significant privacy concerns. Industry-wide limitation for all DNS-based filtering products. | v2.0 if needed |
+| **Rotating MAC address resistance** | **Known limitation** | Devices with rotating MAC randomization (iOS "Rotate Wi-Fi Address") break all MAC-based identification including parental controls and static DHCP. Per-network stable random MACs (the default on iOS/Android/Windows) work fine. Dashboard warns users to disable rotation for managed devices. Industry-wide limitation -- no MAC-independent solution without 802.1X or captive portal auth. | v2.0 if needed |
 | **UEFI Secure Boot** | **Out of scope** | Alpine lacks signed shim/GRUB out of the box. Implementing a full chain-of-trust (shim → signed GRUB → signed kernel) requires custom key enrollment and ongoing signing infrastructure. v1.0 security relies on read-only rootfs, signed OTA bundles, and noexec partitions. See section 10.10. | v1.5 |
 | **TPM 2.0 integration** | **Out of scope** | Odroid H4+ lacks onboard TPM. Alpine supports tpm2-tools, so integration is feasible when TPM hardware is available. Useful for key sealing and measured boot. See section 10.11. | v1.5 |
 | **DPDK acceleration** | **Out of scope** | DPDK is supported on Alpine/musl since v21.05, but adds complexity (hugepages, poll-mode drivers, dedicated cores) not needed at v1 throughput targets. Could be revisited if IPS throughput needs exceed what kernel nftables + NFQUEUE delivers. | v2.0 if needed |
 | **Intel QAT acceleration** | **Out of scope** | Intel QuickAssist crypto offload for VPN/TLS. QAT's user-space libraries do not build cleanly on musl (glibc-specific macros). Would require patching Intel's libraries or using gcompat. Not needed at v1 VPN throughput targets -- WireGuard's kernel implementation saturates 2.5GbE without hardware offload. | v2.0 if needed |
+| **Internationalization (i18n)** | **Out of scope** | v1 is English-only. No vue-i18n or translation framework. Localization deferred until sales data validates demand for specific languages. | Phase 2+ |
 
 ### System Logging Destination
 
@@ -1673,8 +2052,8 @@ For operational troubleshooting after a reboot, the relevant data is in the pers
 ### Config Backup/Restore (v1 minimal)
 
 While scheduled backup is out of scope, v1 provides basic mechanisms:
-- `GET /api/v1/system/backup` -- downloads `config.json` as a file (UI: "Download Backup")
-- `POST /api/v1/system/restore` -- uploads a `config.json`, validates it, applies via two-phase commit (UI: "Restore Backup")
+- `GET /api/v1/system/backup` -- downloads `config.json` as a file (UI: "Download Backup"). **Note:** The backup includes the WireGuard private key so that restore fully works (a backup without the key would break all VPN peers on restore). The UI warns: "This backup file contains sensitive data including your VPN private key. Store it securely."
+- `POST /api/v1/system/restore` -- uploads a `config.json`, validates it, applies via three-phase commit (UI: "Restore Backup")
 - USB recovery mode offers export/import (see Section 10.8)
 - Every config change creates `config.json.bak` (one-step rollback)
 
@@ -1710,7 +2089,75 @@ Users are advised in the quick-start guide to download a backup after initial se
 
 ---
 
-## 16. Glossary
+## 16. Post-Launch Operational Sustainability
+
+Building ScoutOS is a 12-month project. **Sustaining it is an ongoing program.** After v1.0 ships, the product requires continuous security engineering -- not just feature development. This section makes the operational burden explicit so it's planned for, not discovered after launch.
+
+The viability question shifts from "Can we build it?" to "Can we sustain it?"
+
+### 16.1 Ongoing Maintenance Cadences
+
+| Activity | Cadence | Owner | Effort | Automation |
+|----------|---------|-------|--------|------------|
+| **Suricata rule updates** (ET Open) | Daily (automated) | scoutd (suricata-update cron) | None (automated on device) | Fully automated |
+| **DNS blocklist updates** (RPZ) | Daily (automated) | scoutd | None (automated on device) | Fully automated |
+| **GeoIP database updates** | Monthly (automated) | scoutd | None (automated on device) | Fully automated |
+| **CVE monitoring** (grype scan) | Weekly (CI) | Founder | ~1 hour/week to triage | GitHub Actions, Slack/email alerts |
+| **Alpine security patches** | As released (~weekly) | Founder | ~2-4 hours/patch cycle | Manual: review advisory → rebuild → test → OTA |
+| **Suricata version upgrades** | Quarterly (~4 releases/year) | Founder | ~1-2 days per upgrade | Manual: test in VM → build → OTA |
+| **Alpine major version migration** | Every ~2 years (before EOL) | Founder | ~1-2 weeks | Manual: full regression test required |
+| **SBOM regeneration** | Every firmware release | CI pipeline | None (automated) | make bundle includes syft |
+| **GPL source archive** | Every firmware release | CI pipeline | None (automated) | Build script archives sources |
+| **OTA infrastructure** | Continuous | Founder | ~2 hours/month (monitoring, cert renewal) | update.scoututm.com uptime monitoring |
+| **Linux kernel LTS tracking** | Every ~6 months (LTS point releases) | Founder | ~1-2 days per kernel bump | Manual: test initramfs + dm-verity + drivers |
+
+### 16.2 The Security Update Pipeline
+
+When a CVE is discovered in a shipped component, the response process is:
+
+```
+1. grype CI scan flags CVE (or manual discovery via advisory)
+2. Assess severity and exploitability for ScoutOS (not all CVEs apply)
+3. If Critical/High and exploitable:
+   a. Patch within 72 hours (rebuild with patched Alpine package)
+   b. Test in Vagrant VM (smoke + affected subsystem tests)
+   c. Build signed RAUC bundle
+   d. Push OTA update to update.scoututm.com
+   e. Devices with auto-update check within 24 hours
+   f. Publish security advisory on ScoutUTM.com
+4. If Medium/Low or not exploitable:
+   a. Queue for next scheduled firmware release (~monthly cadence)
+```
+
+**Worst-case scenario:** A critical Suricata or kernel CVE requires a same-day patch. The full cycle (rebuild → VM test → sign → publish OTA) should take <4 hours once the pipeline is mature. This is feasible for a solo founder because the build system is automated -- the human work is triage, review, and the decision to ship.
+
+### 16.3 Sustainability Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Founder burnout from constant CVE triage | Automate triage: grype filters by severity, ignore informational. Most Alpine patches are not exploitable in ScoutOS's context (no SSH, no user shells, no web apps beyond scoutd). |
+| Alpine 3.21 EOL before migration is ready | Track Alpine release dates. Begin migration testing 6 months before EOL. Alpine's 2-year support window provides ample lead time. |
+| OTA server downtime prevents security updates | Devices continue operating normally and retry on next interval. Manual update via USB is always available. OTA server is a self-hosted VPS with nginx serving static files (see 7.5). |
+| Suricata upstream introduces breaking changes | Pin Suricata version per ScoutOS release. Test upstream releases in VM before adopting. Maintain ability to carry patches if upstream drops NFQUEUE support. |
+| SBOM/compliance requirements expand beyond current scope | CycloneDX and syft are extensible. If VEX (Vulnerability Exploitability eXchange) or other formats are required, syft supports them. The foundation is in place. |
+
+### 16.4 Solo Founder Capacity Planning
+
+Realistic time allocation after v1.0 ships:
+
+| Activity | Hours/Month |
+|----------|-------------|
+| Security maintenance (CVE triage, patches, OTA) | 8-12 |
+| Customer support (beta testers, bug reports) | 8-12 |
+| Feature development (v1.1, v1.5) | 40-60 |
+| Infrastructure (OTA server, build pipeline, CI) | 4-8 |
+| **Total** | **60-90** |
+
+The security maintenance load is the non-negotiable baseline. If feature development must be cut to maintain security patch cadence, that is the correct trade-off. A UTM appliance that ships known vulnerabilities is worse than one that ships late features.
+
+---
+
+## 17. Glossary
 
 | Term | Definition |
 |------|------------|
@@ -1735,6 +2182,7 @@ Users are advised in the quick-start guide to download a backup after initial se
 | **dnsmasq** | A lightweight daemon that provides DHCP and DNS services. In ScoutOS, only its DHCP functionality is used (DNS is handled by Unbound). |
 | **DoH** | DNS over HTTPS. Encrypts DNS queries inside standard HTTPS connections (port 443). Harder to block than DoT since it blends with normal web traffic. |
 | **DoT** | DNS over TLS. Encrypts DNS queries using TLS on a dedicated port (853). Prevents ISPs and network observers from seeing which domains are being resolved. |
+| **dm-verity** | Device-mapper verity. A Linux kernel feature that provides transparent integrity checking of block devices using a Merkle tree of hashes. ScoutOS uses dm-verity to verify every block read from the SquashFS rootfs partition, detecting corruption or tampering at the block level. |
 | **DPDK** | Data Plane Development Kit. A set of libraries for fast packet processing that bypasses the kernel networking stack. Supported on Alpine/musl since v21.05 but not used in ScoutOS v1 -- kernel-based nftables + NFQUEUE is sufficient for the target throughput. |
 | **ECDSA** | Elliptic Curve Digital Signature Algorithm. A public-key cryptography algorithm used for digital signatures. ScoutOS uses ECDSA P-256 for signing OTA update bundles and for the self-signed TLS certificate. |
 | **ESP** | EFI System Partition. A FAT32 partition on the disk that stores bootloader files (GRUB), kernel images, and boot configuration. Required for UEFI booting. |
@@ -1747,6 +2195,7 @@ Users are advised in the quick-start guide to download a backup after initial se
 | **GeoIP** | Geographic IP filtering. Blocking or allowing network traffic based on the geographic location associated with an IP address. Uses a database (MaxMind/DB-IP) to map IPs to countries. |
 | **`//go:embed`** | A Go compiler directive that embeds files into the compiled binary at build time. ScoutOS uses it to bundle the Vue.js frontend assets directly into the scoutd binary, eliminating the need for a separate web server. |
 | **GPT** | GUID Partition Table. A modern disk partitioning scheme that replaces MBR. Supports large disks and more partitions. Required for UEFI boot. |
+| **grype** | An open-source vulnerability scanner by Anchore that checks SBOMs or container images against known CVE databases. Used in ScoutOS's CI pipeline to detect known vulnerabilities in shipped packages before release. |
 | **GRUB** | GRand Unified Bootloader. A widely-used bootloader that loads the Linux kernel and initramfs. ScoutOS uses GRUB for A/B slot selection, try-counter-based fallback, and the rescue boot entry. |
 | **HMR** | Hot Module Replacement. A development feature where code changes are applied to a running application without a full page reload. Provided by Vite during Vue.js frontend development. |
 | **IDS** | Intrusion Detection System. Monitors network traffic for malicious activity and generates alerts, but does not block traffic. ScoutOS defaults to IDS mode using Suricata. |
@@ -1758,6 +2207,7 @@ Users are advised in the quick-start guide to download a backup after initial se
 | **`LD_PRELOAD`** | A Linux environment variable that loads a shared library before all others, overriding functions (like `malloc`) in the default C library. Used in ScoutOS to optionally swap musl's allocator with jemalloc for Suricata. |
 | **MAC Address** | Media Access Control address. A unique 48-bit hardware identifier assigned to every network interface (e.g., `AA:BB:CC:DD:EE:FF`). Used by DHCP for lease assignment and by scoutd for device identification. |
 | **masquerade** | A form of NAT where outgoing packets have their source IP rewritten to the router's WAN IP. Essential for allowing LAN devices with private IPs to communicate with the internet. |
+| **Merkle tree** | A cryptographic data structure where each leaf node contains a hash of a data block, and each parent node contains a hash of its children. Used by dm-verity to efficiently verify the integrity of individual blocks without hashing the entire disk. |
 | **mimalloc** | A compact, high-performance memory allocator by Microsoft. Like jemalloc, it can replace musl's default allocator via `LD_PRELOAD` for better multi-threaded performance. |
 | **MOK** | Machine Owner Key. A key database in UEFI Secure Boot that allows device owners to enroll custom signing keys alongside the default Microsoft/vendor keys. Required for booting non-major-distribution Linux with Secure Boot enabled. |
 | **musl** | A lightweight C standard library designed for static linking and small binary size. Alpine Linux uses musl instead of glibc, which is why ScoutOS builds Go with `CGO_ENABLED=0` to avoid musl compatibility issues. |
@@ -1781,6 +2231,7 @@ Users are advised in the quick-start guide to download a backup after initial se
 | **RPZ** | Response Policy Zones. A DNS mechanism that allows a resolver (Unbound) to override responses for specific domains. Used for DNS-based content filtering -- blocked domains return NXDOMAIN instead of their real IP address. |
 | **RTC** | Real-Time Clock. A battery-backed hardware clock that keeps time when the system is powered off. The Odroid H4+ lacks an RTC, so ScoutOS uses fake-hwclock to preserve approximate time across reboots. |
 | **SBOM** | Software Bill of Materials. A formal inventory of all software components, versions, and licenses in a product. Required by EU Cyber Resilience Act and U.S. Executive Order 14028. ScoutOS generates SBOMs in CycloneDX format using syft. |
+| **SKU** | Stock Keeping Unit. A distinct product variant, often differentiated by performance tier. In ScoutOS context, throughput benchmarks define what performance claims each hardware configuration's SKU can make. |
 | **SBC** | Single-Board Computer. A complete computer built on a single circuit board, including CPU, memory, and I/O. Examples: Raspberry Pi, Odroid H4+. |
 | **SCHED_FIFO** | A Linux real-time scheduling policy that gives a thread fixed priority and allows it to run until it voluntarily yields or is preempted by a higher-priority thread. Used for Suricata's packet processing threads to prevent latency spikes from lower-priority processes. |
 | **Secure Boot** | A UEFI firmware feature that verifies the cryptographic signature of the bootloader and kernel before executing them, preventing unauthorized code from running at boot. Deferred to ScoutOS v1.5 due to Alpine's lack of out-of-box signed bootloader support. |
