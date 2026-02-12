@@ -18,6 +18,7 @@ func (e ValidationError) Error() string {
 }
 
 var hostnameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9\-]{0,62}$`)
+var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 
 // Validate checks a Config for semantic errors and returns all violations.
 func Validate(cfg *Config) []ValidationError {
@@ -115,6 +116,25 @@ func Validate(cfg *Config) []ValidationError {
 	for i, u := range cfg.DNS.Upstream {
 		if net.ParseIP(u) == nil {
 			errs = append(errs, ValidationError{fmt.Sprintf("dns.upstream[%d]", i), fmt.Sprintf("invalid IP address %q", u)})
+		}
+	}
+
+	// DNS: DoT and DoH are mutually exclusive.
+	if cfg.DNS.UseDOT && cfg.DNS.UseDOH {
+		errs = append(errs, ValidationError{"dns.use_dot", "use_dot and use_doh cannot both be enabled"})
+	}
+
+	// DNS: custom block domains.
+	for i, d := range cfg.DNS.CustomBlock {
+		if !domainRe.MatchString(d) {
+			errs = append(errs, ValidationError{fmt.Sprintf("dns.custom_block[%d]", i), fmt.Sprintf("invalid domain name %q", d)})
+		}
+	}
+
+	// DNS: custom allow domains.
+	for i, d := range cfg.DNS.CustomAllow {
+		if !domainRe.MatchString(d) {
+			errs = append(errs, ValidationError{fmt.Sprintf("dns.custom_allow[%d]", i), fmt.Sprintf("invalid domain name %q", d)})
 		}
 	}
 

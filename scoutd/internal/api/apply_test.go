@@ -72,12 +72,12 @@ func TestAffectedDaemons_NilOld_UsesDaemonNames(t *testing.T) {
 
 	// Engine.DaemonNames returns all registered renderers.
 	names := srv.Render.DaemonNames()
-	if len(names) != 3 {
-		t.Errorf("expected 3 daemon names from engine, got %d: %v", len(names), names)
+	if len(names) != 4 {
+		t.Errorf("expected 4 daemon names from engine, got %d: %v", len(names), names)
 	}
 
 	// Verify the expected daemons are present (order may vary).
-	expected := map[string]bool{"nftables": true, "dnsmasq": true, "chrony": true}
+	expected := map[string]bool{"nftables": true, "dnsmasq": true, "chrony": true, "unbound": true}
 	for _, name := range names {
 		if !expected[name] {
 			t.Errorf("unexpected daemon name: %s", name)
@@ -118,6 +118,42 @@ func TestAffectedDaemons_NTPChange(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected chrony in affected daemons for NTP change")
+	}
+}
+
+func TestAffectedDaemons_DNSChange(t *testing.T) {
+	old := config.DefaultConfig()
+	new_, _ := old.DeepCopy()
+	new_.DNS.Upstream = []string{"8.8.8.8"}
+
+	daemons := affectedDaemons(old, new_)
+	found := false
+	for _, d := range daemons {
+		if d == "unbound" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected unbound in affected daemons for DNS change")
+	}
+}
+
+func TestAffectedDaemons_NetworkChange_TriggersUnbound(t *testing.T) {
+	old := config.DefaultConfig()
+	new_, _ := old.DeepCopy()
+	new_.Network.VLANs = append(new_.Network.VLANs, config.VLANConfig{
+		ID: 100, Parent: "eth1", Zone: "guest", Subnet: "10.0.100.1/24",
+	})
+
+	daemons := affectedDaemons(old, new_)
+	found := false
+	for _, d := range daemons {
+		if d == "unbound" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected unbound in affected daemons for network change (access-control subnets)")
 	}
 }
 
