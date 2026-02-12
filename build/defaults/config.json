@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "system": {
+    "hostname": "scoututm",
+    "timezone": "UTC",
+    "admin_hash": "",
+    "setup_done": false,
+    "language": "en",
+    "ntp_servers": ["pool.ntp.org"]
+  },
+  "network": {
+    "interfaces": [
+      {"name": "eth0", "zone": "wan", "type": "ethernet", "ipv4_mode": "dhcp"},
+      {"name": "eth1", "zone": "lan", "type": "ethernet", "ipv4_mode": "static", "ipv4_address": "192.168.1.1/24"}
+    ],
+    "zones": [
+      {"name": "wan", "input_policy": "drop", "forward_policy": "drop", "output_policy": "accept", "masquerade": true},
+      {"name": "lan", "input_policy": "accept", "forward_policy": "accept", "output_policy": "accept", "masquerade": false}
+    ],
+    "vlans": []
+  },
+  "firewall": {
+    "forwardings": [
+      {"src": "lan", "dest": "wan"}
+    ],
+    "rules": [],
+    "port_forwards": []
+  },
+  "dns": {
+    "upstream": ["1.1.1.1", "9.9.9.9"],
+    "use_dot": false,
+    "use_doh": false,
+    "block_malware": true,
+    "block_phishing": true,
+    "block_ads": false,
+    "query_logging": true,
+    "custom_block": [],
+    "custom_allow": []
+  },
+  "vpn": {
+    "wireguard": {
+      "enabled": false,
+      "listen_port": 51820,
+      "address": "10.0.0.1/24",
+      "tunnel_subnet": "10.0.0.0/24",
+      "peers": []
+    }
+  },
+  "ids": {
+    "enabled": true,
+    "mode": "ids",
+    "rulesets": ["et-open"],
+    "home_net": ["192.168.1.0/24"],
+    "suppressed": []
+  },
+  "parental": {
+    "profiles": [],
+    "devices": []
+  },
+  "update": {
+    "auto_check": true,
+    "auto_install": false,
+    "channel": "stable",
+    "server_url": "https://update.scoututm.com"
+  }
+}
