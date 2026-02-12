@@ -1761,100 +1761,64 @@ For integration testing. A Vagrant-managed VM runs the complete ScoutOS environm
 
 **Setup:**
 ```
-vagrant up          # First run: creates VM, provisions Alpine, starts all services (~2-3 min)
-                    # Subsequent runs: boots existing VM (~30s)
+.\build.ps1         # PowerShell: builds via WSL, provisions VM, runs integration tests (~3-5 min)
+# OR:
+./build.sh          # WSL: same as above
+# OR step-by-step:
+vagrant up          # First run: creates VM, provisions Alpine, starts all services, runs tests
 vagrant ssh         # Shell access for debugging (dev/test only, not in production images)
 ```
 
 **Iterating on scoutd inside the VM:**
 ```
-make scoutd                           # Build on host (~10s)
-vagrant upload build/scoutd /usr/sbin/scoutd    # Copy to VM (~1s)
-vagrant ssh -c "rc-service scoutd restart"       # Restart (~2s)
-# OR: use vagrant rsync-auto for continuous sync
+.\build.ps1                           # Full rebuild + reprovision + tests (~3-5 min)
+# OR: just reprovision (if binary already built):
+vagrant provision                     # Reinstalls binary, restarts, runs tests (~1-2 min)
 ```
 
 **Vagrantfile:**
 ```ruby
 Vagrant.configure("2") do |config|
-  config.vm.box = "generic/alpine321"
-  config.vm.hostname = "scoutos-dev"
-
-  # WAN interface (NAT -- gives the VM internet access)
-  config.vm.network "forwarded_port", guest: 443, host: 8443  # Web UI
-  config.vm.network "forwarded_port", guest: 80, host: 8080
-
-  # LAN interface (host-only network -- simulates LAN segment)
-  config.vm.network "private_network", ip: "192.168.56.1",
-    virtualbox__intnet: "scout-lan"
+  config.vm.box = "generic/alpine319"
+  config.vm.hostname = "scoututm-dev"
 
   config.vm.provider "virtualbox" do |vb|
-    vb.memory = 2048
-    vb.cpus = 2
-    vb.name = "scoutos-dev"
+    vb.cpus = 4
+    vb.memory = 8048
+    vb.name = "scoututm-dev"
   end
 
-  # Also support libvirt/QEMU for Linux hosts / WSL2
-  config.vm.provider "libvirt" do |lv|
-    lv.memory = 2048
-    lv.cpus = 2
-  end
+  # Port forwards -- map host ports to VM ports.
+  config.vm.network "forwarded_port", guest: 443, host: 8443, host_ip: "127.0.0.1"
+  config.vm.network "forwarded_port", guest: 80,  host: 8080, host_ip: "127.0.0.1"
 
-  # Sync scoutd binary from host to VM
-  config.vm.synced_folder "build/", "/opt/scout-build", type: "rsync",
-    rsync__exclude: [".git/", "node_modules/"]
+  # Private network for simulated LAN.
+  config.vm.network "private_network", ip: "192.168.56.10"
 
-  # Provision: install ScoutOS packages and configure environment
+  # Sync build artifacts and tests into the VM.
+  config.vm.synced_folder "build/", "/opt/scout-build"
+  config.vm.synced_folder "tests/", "/opt/scout-tests"
+
+  # Provision with ScoutOS packages + run integration tests.
   config.vm.provision "shell", path: "tools/vagrant-provision.sh"
 end
 ```
 
-**tools/vagrant-provision.sh:**
-```sh
-#!/bin/sh
-# Provision an Alpine VM to behave like a ScoutOS device (dev mode)
-set -eu
-
-apk update
-apk add nftables suricata suricata-update unbound dnsmasq \
-    wireguard-tools chrony iproute2 conntrack-tools \
-    openssl curl jq
-
-# Install scoutd binary from synced build folder
-install -m 755 /opt/scout-build/scoutd /usr/sbin/scoutd
-
-# Copy OpenRC init scripts and config templates
-# (from the build overlay, synced via shared folder)
-cp /opt/scout-build/overlay/etc/init.d/scoutd /etc/init.d/
-chmod 755 /etc/init.d/scoutd
-
-# Create persistent directories (in VM these are just normal dirs)
-mkdir -p /etc/scout /var/lib/scout/suricata/rules /var/lib/scout/logs
-
-# Copy default config if not present
-[ -f /etc/scout/config.json ] || cp /opt/scout-build/defaults/config.json /etc/scout/
-
-# Enable and start services
-for svc in nftables dnsmasq unbound chronyd scoutd; do
-    rc-update add $svc default 2>/dev/null || true
-    rc-service $svc start 2>/dev/null || true
-done
-
-echo "ScoutOS dev VM provisioned. Web UI at https://localhost:8443"
-```
+**Implementation notes vs. original plan:**
+- Box changed from `generic/alpine321` (unavailable) to `generic/alpine319`.
+- Synced folder uses default VirtualBox shared folders (rsync doesn't work on Windows/WSL2).
+- VM resources increased to 4 CPUs / 8GB RAM for faster provisioning.
+- scoutd runs in `--dev-mode` to allow SSH/HTTPS on WAN (Vagrant's eth0). Templates still render to real paths (`--output-dir /etc`).
+- Integration tests run automatically at the end of provisioning. Tests that check nftables state reload rules manually with `nft -f` since dev-mode stubs service reloads.
 
 **What this tier covers:**
 - Full nftables firewall (rule loading, zone policies, NAT, DNS redirect)
-- Unbound DNS resolution with RPZ blocklists
+- Unbound DNS resolution (RPZ blocklists disabled in dev VM -- no real blocklist data)
 - dnsmasq DHCP (VM's host-only network acts as LAN)
-- Suricata IDS/IPS in NFQUEUE mode
-- WireGuard VPN server
+- WireGuard VPN config rendering and API management
 - chrony NTP sync
-- Config three-phase commit with real daemon reloads
-- Full boot-to-operational testing
-- OTA update flow (RAUC install to a disk image mounted in the VM)
-- Setup wizard end-to-end
-- Integration test suite (`tests/smoke_test.sh`, `tests/network_test.sh`, `tests/api_test.sh`)
+- Template rendering to real daemon config paths
+- Integration test suite (5 active suites, 71 checks, run automatically on provision)
 
 **What this tier cannot test:**
 - Intel I226-V NIC driver behavior
@@ -1955,23 +1919,25 @@ RUN apk add --no-cache go nodejs npm alpine-make-rootfs \
 
 ### 12.2 Integration Tests (shell scripts, run in Vagrant VM)
 
-All integration tests run via `tests/run_all.sh` which executes each script and reports pass/fail. These run at every milestone gate (Alpha M4, Beta M8, RC M10).
+All integration tests run automatically at the end of `vagrant up` / `vagrant provision`. The provisioning script iterates over `tests/*_test.sh`, skipping empty placeholder scripts, and reports pass/fail for each suite. These run at every milestone gate (Alpha M4, Beta M8, RC M10).
 
-| Script | What It Tests | When Added |
-|--------|--------------|------------|
-| `smoke_test.sh` | Boot, scoutd API responds, all 6 services running, config.json valid | Month 1 |
-| `network_test.sh` | WAN DHCP, LAN DHCP serving, DNS resolution, NAT/masquerade, DNS redirect (bypass prevention) | Month 2 |
-| `api_test.sh` | All REST endpoints: CRUD operations, auth, validation errors, boundary cases | Month 2 (grows each month) |
-| `rollback_test.sh` | Config apply failures trigger rollback, startup recovery from pending file, rapid save serialization | Month 3 |
-| `dns_test.sh` | Unbound recursive resolution, DNSSEC validation, RPZ blocklist blocks test domains, custom allow/block | Month 3 |
-| `vlan_test.sh` | VLAN creation, zone isolation (IoT cannot reach LAN), inter-zone forwarding rules | Month 4 |
-| `vpn_test.sh` | WireGuard tunnel up, peer connectivity, key generation, syncconf reload | Month 4 |
-| `ids_test.sh` | Suricata alert on test signature, eve.json socket delivery, fail-open when Suricata stopped | Month 5 |
-| `stress_test.sh` | nmap scan through the firewall (triggers alert storm), verify WebSocket rate limiting, verify no OOM or crash | Month 7 |
-| `update_test.sh` | RAUC bundle install, reboot, version check, health check pass, deliberate bad bundle → rollback | Month 9 |
-| `wizard_test.sh` | Setup wizard end-to-end: all 7 steps, config generated, services configured | Month 7 |
+| Script | What It Tests | When Added | Status (Month 4) |
+|--------|--------------|------------|-------------------|
+| `smoke_test.sh` | Boot, scoutd API responds, services running, config.json valid, TLS cert | Month 1 | **10 checks, passing** |
+| `network_test.sh` | nftables rules loaded (zone sets, IPv6 drop, DNS redirect, masquerade), dnsmasq DHCP, chrony | Month 2 | **9 checks, passing** |
+| `api_test.sh` | REST endpoints: CRUD operations, auth, validation errors, protected zones | Month 2 (grows each month) | **12 checks, passing** |
+| `rollback_test.sh` | Config apply failures trigger rollback, startup recovery from pending file, rapid save serialization | Month 5 | Placeholder (deferred -- requires multi-daemon rollback scenarios from Month 5) |
+| `dns_test.sh` | Unbound recursive resolution, DNSSEC validation, RPZ blocklist blocks test domains, custom allow/block | Month 5 | Placeholder (deferred -- requires real blocklist data and Suricata integration context) |
+| `vlan_test.sh` | VLAN creation, zone isolation (IoT has separate input chain), nftables zone sets with VLAN sub-interfaces, dnsmasq DHCP per VLAN, DNS redirect per zone, chrony allows VLAN subnets | Month 4 | **14 checks, passing** |
+| `vpn_test.sh` | WireGuard enable/disable, key generation, nftables VPN rules (WAN port, input_vpn chain, forwarding, DNS redirect), peer CRUD, tunnel IP allocation, split/full tunnel, client config (LAN DNS, server info), key regeneration, QR codes | Month 4 | **26 checks, passing** |
+| `ids_test.sh` | Suricata alert on test signature, eve.json socket delivery, fail-open when Suricata stopped | Month 5 | Placeholder |
+| `stress_test.sh` | nmap scan through the firewall (triggers alert storm), verify WebSocket rate limiting, verify no OOM or crash | Month 7 | Placeholder |
+| `update_test.sh` | RAUC bundle install, reboot, version check, health check pass, deliberate bad bundle → rollback | Month 9 | Placeholder |
+| `wizard_test.sh` | Setup wizard end-to-end: all 7 steps, config generated, services configured | Month 7 | Placeholder |
 
-**Test automation strategy:** Each test script is self-contained and idempotent -- it sets up its preconditions, runs assertions, and cleans up. The multi-VM Vagrant setup (scout + client) provides the LAN client perspective for DNS, DHCP, and VLAN tests. Tests use `curl` for API assertions and standard CLI tools (`dig`, `nft`, `wg`, `ping`) for network assertions.
+**Month 4 Alpha gate totals:** 170 unit tests (Go) + 71 integration checks (5 suites) across 5 active test scripts.
+
+**Test automation strategy:** Each test script is self-contained and idempotent -- it sets up its preconditions, runs assertions, and cleans up. Tests use `curl` for API assertions and standard CLI tools (`nft`, `grep`, `jq`) for config and nftables verification. Since scoutd runs in `--dev-mode` in the VM (needed for SSH access), tests that verify nftables state manually reload rules via `nft -f /etc/nftables.conf` after API changes.
 
 ### 12.3 Production QA (every unit before shipping)
 

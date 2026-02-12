@@ -17,6 +17,7 @@ type NftablesData struct {
 	IDS            config.IDSConfig
 	VPN            config.WireGuardConfig
 	ZoneInterfaces map[string][]string
+	DevMode        bool
 }
 
 // RenderNftables renders nftables.conf from the config.
@@ -31,6 +32,7 @@ func (e *Engine) RenderNftables(cfg *config.Config) error {
 		IDS:            cfg.IDS,
 		VPN:            cfg.VPN.WireGuard,
 		ZoneInterfaces: buildZoneInterfaceMap(cfg),
+		DevMode:        e.devMode,
 	}
 	return e.renderTemplate("nftables.conf.tmpl", e.outputPath("nftables.conf"), data)
 }

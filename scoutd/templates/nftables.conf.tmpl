@@ -74,10 +74,22 @@ table inet scout {
 		udp dport 123 accept
 		# Allow HTTPS (web UI).
 		tcp dport 443 accept
+{{- if $.DevMode}}
+		# Dev mode: allow SSH for Vagrant access.
+		tcp dport 22 accept
 {{- end}}
-{{- if and (eq .Name "wan") $.VPN.Enabled}}
+{{- end}}
+{{- if eq .Name "wan"}}
+{{- if $.VPN.Enabled}}
 		# Allow WireGuard VPN.
 		udp dport {{$.VPN.ListenPort}} accept
+{{- end}}
+{{- if $.DevMode}}
+		# Dev mode: allow SSH and HTTPS on WAN for Vagrant access.
+		tcp dport 22 accept
+		tcp dport 443 accept
+		tcp dport 80 accept
+{{- end}}
 {{- end}}
 {{- if eq .InputPolicy "accept"}}
 		accept
