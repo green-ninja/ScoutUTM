@@ -158,7 +158,7 @@ func TestStubEndpoint_Returns501(t *testing.T) {
 	setAdminPassword(t, srv, "testpassword")
 	token := loginAndGetToken(t, srv, "testpassword")
 
-	req := httptest.NewRequest("GET", "/api/v1/network/vlans", nil)
+	req := httptest.NewRequest("GET", "/api/v1/devices", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, req)

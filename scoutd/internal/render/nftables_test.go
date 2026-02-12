@@ -266,3 +266,56 @@ func TestBuildZoneInterfaceMap_WithVLAN(t *testing.T) {
 		t.Errorf("guest interfaces = %v, want [eth1.100]", m["guest"])
 	}
 }
+
+func TestRenderNftables_WireGuardEnabled(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.VPN.WireGuard.Enabled = true
+	cfg.VPN.WireGuard.ListenPort = 51820
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	if !strings.Contains(content, "udp dport 51820 accept") {
+		t.Error("expected WireGuard UDP port accept rule in WAN input")
+	}
+}
+
+func TestRenderNftables_WireGuardDisabled(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.VPN.WireGuard.Enabled = false
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	if strings.Contains(content, "udp dport 51820 accept") {
+		t.Error("WireGuard disabled should not have UDP port accept rule")
+	}
+}
+
+func TestRenderNftables_WireGuardCustomPort(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.VPN.WireGuard.Enabled = true
+	cfg.VPN.WireGuard.ListenPort = 12345
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	if !strings.Contains(content, "udp dport 12345 accept") {
+		t.Error("expected WireGuard custom port 12345 in WAN input")
+	}
+}

@@ -67,6 +67,10 @@ table inet scout {
 		# Allow HTTPS (web UI).
 		tcp dport 443 accept
 {{- end}}
+{{- if and (eq .Name "wan") $.VPN.Enabled}}
+		# Allow WireGuard VPN.
+		udp dport {{$.VPN.ListenPort}} accept
+{{- end}}
 {{- if eq .InputPolicy "accept"}}
 		accept
 {{- else}}

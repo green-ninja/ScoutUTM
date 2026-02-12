@@ -159,8 +159,68 @@ func Validate(cfg *Config) []ValidationError {
 		}
 	}
 
-	// VPN: WireGuard peer AllowedIPs must be valid CIDR.
+	// Network VLANs.
+	ifaceNames := make(map[string]bool)
+	for _, iface := range cfg.Network.Interfaces {
+		ifaceNames[iface.Name] = true
+	}
+	vlanIDs := make(map[int]bool)
+	for i, vlan := range cfg.Network.VLANs {
+		if vlan.ID < 1 || vlan.ID > 4094 {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].id", i), "must be between 1 and 4094"})
+		}
+		if vlanIDs[vlan.ID] {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].id", i), fmt.Sprintf("duplicate VLAN ID %d", vlan.ID)})
+		}
+		vlanIDs[vlan.ID] = true
+		if vlan.Parent == "" || !ifaceNames[vlan.Parent] {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].parent", i), fmt.Sprintf("references unknown interface %q", vlan.Parent)})
+		}
+		if vlan.Zone != "" && !zoneNames[vlan.Zone] {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].zone", i), fmt.Sprintf("references unknown zone %q", vlan.Zone)})
+		}
+		if vlan.Subnet != "" {
+			if _, _, err := net.ParseCIDR(vlan.Subnet); err != nil {
+				errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].subnet", i), fmt.Sprintf("invalid CIDR %q", vlan.Subnet)})
+			}
+		}
+		if vlan.DHCPRange.Start != "" && net.ParseIP(vlan.DHCPRange.Start) == nil {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].dhcp_range.start", i), "invalid IP address"})
+		}
+		if vlan.DHCPRange.End != "" && net.ParseIP(vlan.DHCPRange.End) == nil {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.vlans[%d].dhcp_range.end", i), "invalid IP address"})
+		}
+	}
+
+	// VPN: WireGuard settings (when enabled).
+	if cfg.VPN.WireGuard.Enabled {
+		if cfg.VPN.WireGuard.ListenPort < 1 || cfg.VPN.WireGuard.ListenPort > 65535 {
+			errs = append(errs, ValidationError{"vpn.wireguard.listen_port", "must be between 1 and 65535"})
+		}
+		if cfg.VPN.WireGuard.Address != "" {
+			if _, _, err := net.ParseCIDR(cfg.VPN.WireGuard.Address); err != nil {
+				errs = append(errs, ValidationError{"vpn.wireguard.address", fmt.Sprintf("invalid CIDR %q", cfg.VPN.WireGuard.Address)})
+			}
+		}
+		if cfg.VPN.WireGuard.TunnelSubnet != "" {
+			if _, _, err := net.ParseCIDR(cfg.VPN.WireGuard.TunnelSubnet); err != nil {
+				errs = append(errs, ValidationError{"vpn.wireguard.tunnel_subnet", fmt.Sprintf("invalid CIDR %q", cfg.VPN.WireGuard.TunnelSubnet)})
+			}
+		}
+	}
+
+	// VPN: WireGuard peer validation.
+	peerPubKeys := make(map[string]bool)
+	peerTunnelIPs := make(map[string]bool)
 	for i, peer := range cfg.VPN.WireGuard.Peers {
+		if peerPubKeys[peer.PublicKey] {
+			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].public_key", i), "duplicate public key"})
+		}
+		peerPubKeys[peer.PublicKey] = true
+		if peerTunnelIPs[peer.TunnelIP] {
+			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].tunnel_ip", i), "duplicate tunnel IP"})
+		}
+		peerTunnelIPs[peer.TunnelIP] = true
 		for j, cidr := range peer.AllowedIPs {
 			if _, _, err := net.ParseCIDR(cidr); err != nil {
 				errs = append(errs, ValidationError{

@@ -15,6 +15,7 @@ type NftablesData struct {
 	Rules          []config.FirewallRule
 	PortForwards   []config.PortForward
 	IDS            config.IDSConfig
+	VPN            config.WireGuardConfig
 	ZoneInterfaces map[string][]string
 }
 
@@ -28,6 +29,7 @@ func (e *Engine) RenderNftables(cfg *config.Config) error {
 		Rules:          cfg.Firewall.Rules,
 		PortForwards:   cfg.Firewall.PortForwards,
 		IDS:            cfg.IDS,
+		VPN:            cfg.VPN.WireGuard,
 		ZoneInterfaces: buildZoneInterfaceMap(cfg),
 	}
 	return e.renderTemplate("nftables.conf.tmpl", e.outputPath("nftables.conf"), data)

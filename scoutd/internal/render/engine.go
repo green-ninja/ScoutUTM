@@ -33,10 +33,11 @@ type DaemonRenderer func(cfg *config.Config) error
 // renderers maps daemon names to their render functions.
 func (e *Engine) renderers() map[string]DaemonRenderer {
 	return map[string]DaemonRenderer{
-		"nftables": e.RenderNftables,
-		"dnsmasq":  e.RenderDnsmasq,
-		"chrony":   e.RenderChrony,
-		"unbound":  e.RenderUnbound,
+		"nftables":  e.RenderNftables,
+		"dnsmasq":   e.RenderDnsmasq,
+		"chrony":    e.RenderChrony,
+		"unbound":   e.RenderUnbound,
+		"wireguard": e.RenderWireGuard,
 	}
 }
 

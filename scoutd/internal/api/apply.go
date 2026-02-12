@@ -106,10 +106,11 @@ func (s *Server) rollback(oldCfg *config.Config, daemons []string) {
 func affectedDaemons(old, new *config.Config) []string {
 	var daemons []string
 
-	// nftables: affected by Firewall, Network (zones/interfaces/VLANs), IDS changes.
+	// nftables: affected by Firewall, Network (zones/interfaces/VLANs), IDS, VPN changes.
 	if !reflect.DeepEqual(old.Firewall, new.Firewall) ||
 		!reflect.DeepEqual(old.Network, new.Network) ||
-		!reflect.DeepEqual(old.IDS, new.IDS) {
+		!reflect.DeepEqual(old.IDS, new.IDS) ||
+		!reflect.DeepEqual(old.VPN, new.VPN) {
 		daemons = append(daemons, "nftables")
 	}
 

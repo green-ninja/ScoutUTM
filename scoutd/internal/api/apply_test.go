@@ -72,12 +72,12 @@ func TestAffectedDaemons_NilOld_UsesDaemonNames(t *testing.T) {
 
 	// Engine.DaemonNames returns all registered renderers.
 	names := srv.Render.DaemonNames()
-	if len(names) != 4 {
-		t.Errorf("expected 4 daemon names from engine, got %d: %v", len(names), names)
+	if len(names) != 5 {
+		t.Errorf("expected 5 daemon names from engine, got %d: %v", len(names), names)
 	}
 
 	// Verify the expected daemons are present (order may vary).
-	expected := map[string]bool{"nftables": true, "dnsmasq": true, "chrony": true, "unbound": true}
+	expected := map[string]bool{"nftables": true, "dnsmasq": true, "chrony": true, "unbound": true, "wireguard": true}
 	for _, name := range names {
 		if !expected[name] {
 			t.Errorf("unexpected daemon name: %s", name)

@@ -29,7 +29,7 @@ func TestRenderAll(t *testing.T) {
 	}
 
 	// Verify output files exist.
-	for _, name := range []string{"nftables.conf", "dnsmasq.conf", "chrony/chrony.conf", "unbound/unbound.conf"} {
+	for _, name := range []string{"nftables.conf", "dnsmasq.conf", "chrony/chrony.conf", "unbound/unbound.conf", "wireguard.conf"} {
 		path := filepath.Join(e.outputDir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected output file %s to exist", name)

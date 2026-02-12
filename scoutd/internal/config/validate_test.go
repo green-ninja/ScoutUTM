@@ -179,6 +179,131 @@ func TestValidate_ValidCIDRValues(t *testing.T) {
 	}
 }
 
+func TestValidate_VLANIDRange(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 0, Parent: "eth1", Zone: "lan", Subnet: "10.0.100.1/24"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "network.vlans[0].id") {
+		t.Error("expected error for VLAN ID 0")
+	}
+
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 5000, Parent: "eth1", Zone: "lan", Subnet: "10.0.100.1/24"},
+	}
+	errs = Validate(cfg)
+	if !hasField(errs, "network.vlans[0].id") {
+		t.Error("expected error for VLAN ID 5000")
+	}
+}
+
+func TestValidate_VLANDuplicateID(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 100, Parent: "eth1", Zone: "lan", Subnet: "10.0.100.1/24"},
+		{ID: 100, Parent: "eth1", Zone: "lan", Subnet: "10.0.101.1/24"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "network.vlans[1].id") {
+		t.Error("expected error for duplicate VLAN ID")
+	}
+}
+
+func TestValidate_VLANInvalidParent(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 100, Parent: "nonexistent", Zone: "lan", Subnet: "10.0.100.1/24"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "network.vlans[0].parent") {
+		t.Error("expected error for invalid VLAN parent interface")
+	}
+}
+
+func TestValidate_VLANInvalidZone(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 100, Parent: "eth1", Zone: "nonexistent", Subnet: "10.0.100.1/24"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "network.vlans[0].zone") {
+		t.Error("expected error for invalid VLAN zone reference")
+	}
+}
+
+func TestValidate_VLANInvalidSubnet(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 100, Parent: "eth1", Zone: "lan", Subnet: "not-a-cidr"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "network.vlans[0].subnet") {
+		t.Error("expected error for invalid VLAN subnet")
+	}
+}
+
+func TestValidate_WireGuardListenPortRange(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.VPN.WireGuard.Enabled = true
+	cfg.VPN.WireGuard.ListenPort = 0
+	errs := Validate(cfg)
+	if !hasField(errs, "vpn.wireguard.listen_port") {
+		t.Error("expected error for listen_port 0")
+	}
+
+	cfg.VPN.WireGuard.ListenPort = 70000
+	errs = Validate(cfg)
+	if !hasField(errs, "vpn.wireguard.listen_port") {
+		t.Error("expected error for listen_port 70000")
+	}
+}
+
+func TestValidate_WireGuardInvalidAddress(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.VPN.WireGuard.Enabled = true
+	cfg.VPN.WireGuard.Address = "not-a-cidr"
+	errs := Validate(cfg)
+	if !hasField(errs, "vpn.wireguard.address") {
+		t.Error("expected error for invalid WireGuard address")
+	}
+}
+
+func TestValidate_WireGuardDuplicatePeerKeys(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.VPN.WireGuard.Peers = []WireGuardPeer{
+		{Name: "a", PublicKey: "key1", AllowedIPs: []string{"10.0.0.2/32"}, TunnelIP: "10.0.0.2"},
+		{Name: "b", PublicKey: "key1", AllowedIPs: []string{"10.0.0.3/32"}, TunnelIP: "10.0.0.3"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "vpn.wireguard.peers[1].public_key") {
+		t.Error("expected error for duplicate peer public key")
+	}
+}
+
+func TestValidate_WireGuardDuplicateTunnelIPs(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.VPN.WireGuard.Peers = []WireGuardPeer{
+		{Name: "a", PublicKey: "key1", AllowedIPs: []string{"10.0.0.2/32"}, TunnelIP: "10.0.0.2"},
+		{Name: "b", PublicKey: "key2", AllowedIPs: []string{"10.0.0.2/32"}, TunnelIP: "10.0.0.2"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "vpn.wireguard.peers[1].tunnel_ip") {
+		t.Error("expected error for duplicate peer tunnel IP")
+	}
+}
+
+func TestValidate_ValidVLAN(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.VLANs = []VLANConfig{
+		{ID: 100, Parent: "eth1", Zone: "lan", Subnet: "10.0.100.1/24"},
+	}
+	errs := Validate(cfg)
+	if hasField(errs, "network.vlans[0].id") || hasField(errs, "network.vlans[0].parent") || hasField(errs, "network.vlans[0].zone") {
+		t.Error("valid VLAN should not produce errors")
+	}
+}
+
 func hasField(errs []ValidationError, field string) bool {
 	for _, e := range errs {
 		if e.Field == field {
