@@ -108,6 +108,18 @@ func TestValidate_InvalidPortForward(t *testing.T) {
 	}
 }
 
+func TestValidate_ForwardingZoneNoInterfaces(t *testing.T) {
+	cfg := DefaultConfig()
+	// Add a zone with no interfaces assigned.
+	cfg.Network.Zones = append(cfg.Network.Zones, ZoneConfig{Name: "orphan", InputPolicy: "drop", ForwardPolicy: "drop", OutputPolicy: "accept"})
+	cfg.Firewall.Forwardings = append(cfg.Firewall.Forwardings, ForwardingRule{Src: "orphan", Dest: "wan"})
+
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.forwardings[1].src") {
+		t.Error("expected error for forwarding with zone that has no interfaces")
+	}
+}
+
 func hasField(errs []ValidationError, field string) bool {
 	for _, e := range errs {
 		if e.Field == field {

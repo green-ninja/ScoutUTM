@@ -1,5 +1,7 @@
 package config
 
+import "encoding/json"
+
 // CurrentSchemaVersion is the config schema version this build expects.
 const CurrentSchemaVersion = 1
 
@@ -161,6 +163,19 @@ type UpdateConfig struct {
 	AutoInstall bool   `json:"auto_install"`
 	Channel     string `json:"channel"`
 	ServerURL   string `json:"server_url"`
+}
+
+// DeepCopy returns a deep copy of the config via JSON roundtrip.
+func (c *Config) DeepCopy() (*Config, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	var cp Config
+	if err := json.Unmarshal(data, &cp); err != nil {
+		return nil, err
+	}
+	return &cp, nil
 }
 
 // DefaultConfig returns a Config with sensible defaults for a fresh install.

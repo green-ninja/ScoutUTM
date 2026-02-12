@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -65,5 +66,66 @@ func TestCleanup(t *testing.T) {
 	m.mu.Unlock()
 	if count != 0 {
 		t.Errorf("sessions after cleanup = %d, want 0", count)
+	}
+}
+
+func TestRateLimiter_AllowsInitial(t *testing.T) {
+	rl := NewLoginRateLimiter()
+	if !rl.Allow("192.168.1.10") {
+		t.Error("should allow initial attempt")
+	}
+}
+
+func TestRateLimiter_BlocksAfterMaxFailures(t *testing.T) {
+	rl := NewLoginRateLimiter()
+	ip := "192.168.1.10"
+
+	for i := 0; i < 5; i++ {
+		rl.RecordFailure(ip)
+	}
+
+	if rl.Allow(ip) {
+		t.Error("should block after 5 failures")
+	}
+}
+
+func TestRateLimiter_AllowsDifferentIP(t *testing.T) {
+	rl := NewLoginRateLimiter()
+
+	for i := 0; i < 5; i++ {
+		rl.RecordFailure("192.168.1.10")
+	}
+
+	if !rl.Allow("192.168.1.11") {
+		t.Error("should allow different IP")
+	}
+}
+
+func TestRateLimiter_GlobalLimit(t *testing.T) {
+	rl := NewLoginRateLimiter()
+
+	// 20 failures from different IPs.
+	for i := 0; i < 20; i++ {
+		rl.RecordFailure(fmt.Sprintf("192.168.1.%d", i))
+	}
+
+	// 21st from a new IP should be blocked by global limit.
+	if rl.Allow("10.0.0.1") {
+		t.Error("should block after global limit reached")
+	}
+}
+
+func TestRateLimiter_ResetIPClearsBlock(t *testing.T) {
+	rl := NewLoginRateLimiter()
+	ip := "192.168.1.10"
+
+	for i := 0; i < 5; i++ {
+		rl.RecordFailure(ip)
+	}
+
+	rl.ResetIP(ip)
+
+	if !rl.Allow(ip) {
+		t.Error("should allow after ResetIP")
 	}
 }

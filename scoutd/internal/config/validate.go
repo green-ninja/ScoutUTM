@@ -61,13 +61,30 @@ func Validate(cfg *Config) []ValidationError {
 		}
 	}
 
-	// Firewall forwardings must reference valid zones.
+	// Build zone→interface map for forwarding validation.
+	zoneHasIface := make(map[string]bool)
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone != "" {
+			zoneHasIface[iface.Zone] = true
+		}
+	}
+	for _, vlan := range cfg.Network.VLANs {
+		if vlan.Zone != "" {
+			zoneHasIface[vlan.Zone] = true
+		}
+	}
+
+	// Firewall forwardings must reference valid zones with at least one interface.
 	for i, fwd := range cfg.Firewall.Forwardings {
 		if !zoneNames[fwd.Src] {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.forwardings[%d].src", i), fmt.Sprintf("references unknown zone %q", fwd.Src)})
+		} else if !zoneHasIface[fwd.Src] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.forwardings[%d].src", i), fmt.Sprintf("zone %q has no interfaces assigned", fwd.Src)})
 		}
 		if !zoneNames[fwd.Dest] {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.forwardings[%d].dest", i), fmt.Sprintf("references unknown zone %q", fwd.Dest)})
+		} else if !zoneHasIface[fwd.Dest] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.forwardings[%d].dest", i), fmt.Sprintf("zone %q has no interfaces assigned", fwd.Dest)})
 		}
 	}
 

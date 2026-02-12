@@ -24,6 +24,8 @@ import (
 	"github.com/scoututm/scoutd/internal/api"
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/render"
+	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
 )
 
@@ -32,12 +34,14 @@ var version = "0.1.0-dev"
 
 func main() {
 	var (
-		configPath string
-		devMode    bool
-		addr       string
-		httpAddr   string
-		tlsDir     string
-		showVer    bool
+		configPath  string
+		devMode     bool
+		addr        string
+		httpAddr    string
+		tlsDir      string
+		templateDir string
+		outputDir   string
+		showVer     bool
 	)
 
 	flag.StringVar(&configPath, "config", "/etc/scout/config.json", "path to config file")
@@ -45,6 +49,8 @@ func main() {
 	flag.StringVar(&addr, "addr", ":443", "HTTPS listen address")
 	flag.StringVar(&httpAddr, "http-addr", ":80", "HTTP redirect listen address")
 	flag.StringVar(&tlsDir, "tls-dir", "/etc/scout/tls", "directory for TLS certificate and key")
+	flag.StringVar(&templateDir, "template-dir", "/usr/share/scoutd/templates", "directory containing config templates")
+	flag.StringVar(&outputDir, "output-dir", "/etc", "directory for rendered config output")
 	flag.BoolVar(&showVer, "version", false, "print version and exit")
 	flag.Parse()
 
@@ -66,6 +72,12 @@ func main() {
 		}
 		if !isFlagSet("tls-dir") {
 			tlsDir = "./tls"
+		}
+		if !isFlagSet("template-dir") {
+			templateDir = "./templates"
+		}
+		if !isFlagSet("output-dir") {
+			outputDir = "./output"
 		}
 		log.Println("[dev-mode] enabled")
 	}
@@ -100,8 +112,17 @@ func main() {
 	hub := ws.NewHub()
 	go hub.Run()
 
+	// Template rendering engine.
+	engine := render.NewEngine(templateDir, outputDir, devMode)
+	if err := engine.RenderAll(store.Current()); err != nil {
+		log.Printf("warning: initial template render: %v", err)
+	}
+
+	// Service manager.
+	svcMgr := service.NewManager(devMode)
+
 	// API server.
-	srv := api.NewServer(store, sessions, hub, devMode, version)
+	srv := api.NewServer(store, sessions, hub, engine, svcMgr, devMode, version)
 	router := srv.Router()
 
 	// TLS.

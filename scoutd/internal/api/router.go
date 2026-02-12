@@ -10,29 +10,37 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/render"
+	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
 )
 
 // Server holds dependencies for all API handlers.
 type Server struct {
-	Config   *config.Store
-	Sessions *auth.SessionManager
-	Hub      *ws.Hub
-	DevMode  bool
-	Version  string
+	Config      *config.Store
+	Sessions    *auth.SessionManager
+	RateLimiter *auth.LoginRateLimiter
+	Hub         *ws.Hub
+	Render      *render.Engine
+	Services    *service.Manager
+	DevMode     bool
+	Version     string
 
 	startTime time.Time
 }
 
 // NewServer creates an API server.
-func NewServer(cfg *config.Store, sessions *auth.SessionManager, hub *ws.Hub, devMode bool, version string) *Server {
+func NewServer(cfg *config.Store, sessions *auth.SessionManager, hub *ws.Hub, renderer *render.Engine, svcMgr *service.Manager, devMode bool, version string) *Server {
 	return &Server{
-		Config:    cfg,
-		Sessions:  sessions,
-		Hub:       hub,
-		DevMode:   devMode,
-		Version:   version,
-		startTime: time.Now(),
+		Config:      cfg,
+		Sessions:    sessions,
+		RateLimiter: auth.NewLoginRateLimiter(),
+		Hub:         hub,
+		Render:      renderer,
+		Services:    svcMgr,
+		DevMode:     devMode,
+		Version:     version,
+		startTime:   time.Now(),
 	}
 }
 
@@ -81,6 +89,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleLogin authenticates with password and returns a session token.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := r.RemoteAddr
+
+	// Rate limiting check.
+	if !s.RateLimiter.Allow(ip) {
+		w.Header().Set("Retry-After", "300")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many login attempts"})
+		return
+	}
+
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -101,9 +118,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !auth.CheckPassword(req.Password, cfg.System.AdminHash) {
+		s.RateLimiter.RecordFailure(ip)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid password"})
 		return
 	}
+
+	s.RateLimiter.ResetIP(ip)
 
 	token, err := s.Sessions.Create()
 	if err != nil {

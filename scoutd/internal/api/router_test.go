@@ -10,6 +10,8 @@ import (
 
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/render"
+	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
 )
 
@@ -22,8 +24,21 @@ func testServer(t *testing.T) (*Server, func()) {
 	}
 	sessions := auth.NewSessionManager()
 	hub := ws.NewHub()
-	srv := NewServer(store, sessions, hub, true, "0.1.0-test")
+	tmplDir := copyTemplates(t)
+	outputDir := filepath.Join(dir, "output")
+	engine := render.NewEngine(tmplDir, outputDir, true)
+	svcMgr := service.NewManager(true)
+	srv := NewServer(store, sessions, hub, engine, svcMgr, true, "0.1.0-test")
 	return srv, func() {}
+}
+
+// copyTemplates copies template files to a temp dir for tests.
+func copyTemplates(t *testing.T) string {
+	t.Helper()
+	// Find the templates directory relative to the test file.
+	// In tests, we're in scoutd/internal/api/ — templates are at scoutd/templates/.
+	tmplDir := filepath.Join("..", "..", "templates")
+	return tmplDir
 }
 
 func setAdminPassword(t *testing.T, srv *Server, password string) {
@@ -143,7 +158,7 @@ func TestStubEndpoint_Returns501(t *testing.T) {
 	setAdminPassword(t, srv, "testpassword")
 	token := loginAndGetToken(t, srv, "testpassword")
 
-	req := httptest.NewRequest("GET", "/api/v1/firewall", nil)
+	req := httptest.NewRequest("GET", "/api/v1/network/vlans", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, req)
@@ -164,7 +179,36 @@ func TestAuthMiddleware_AcceptsCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("cookie auth: status = %d, want 501 (not 401)", w.Code)
+	if w.Code == http.StatusUnauthorized {
+		t.Errorf("cookie auth: status = %d, want non-401", w.Code)
+	}
+}
+
+func TestLogin_RateLimited(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+
+	router := srv.Router()
+
+	// 5 failed attempts.
+	for i := 0; i < 5; i++ {
+		body, _ := json.Marshal(map[string]string{"password": "wrong"})
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+	}
+
+	// 6th attempt should be rate-limited.
+	body, _ := json.Marshal(map[string]string{"password": "testpassword"})
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("rate-limited login: status = %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("rate-limited response missing Retry-After header")
 	}
 }
