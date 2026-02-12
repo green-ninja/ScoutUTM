@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -99,6 +100,27 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "zone not found"})
 		return
 	}
+
+	// Check for firewall forwardings that reference this zone.
+	for _, fwd := range cfg.Firewall.Forwardings {
+		if fwd.Src == name || fwd.Dest == name {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("zone %q is referenced by a firewall forwarding rule", name),
+			})
+			return
+		}
+	}
+
+	// Check for firewall rules that reference this zone.
+	for _, rule := range cfg.Firewall.Rules {
+		if rule.Src == name || rule.Dest == name {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("zone %q is referenced by firewall rule %q", name, rule.Name),
+			})
+			return
+		}
+	}
+
 	cfg.Network.Zones = zones
 
 	if err := s.applyConfig(cfg); err != nil {

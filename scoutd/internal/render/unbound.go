@@ -1,8 +1,6 @@
 package render
 
 import (
-	"net"
-
 	"github.com/scoututm/scoutd/internal/config"
 )
 
@@ -76,7 +74,7 @@ func buildUnboundData(cfg *config.Config) UnboundData {
 	return UnboundData{
 		ListenAddr:   "0.0.0.0",
 		Port:         53,
-		AccessNets:   unboundAccessNets(cfg),
+		AccessNets:   localSubnets(cfg),
 		Upstreams:    upstreams,
 		UseTLS:       cfg.DNS.UseDOT,
 		DNSSEC:       true,
@@ -87,28 +85,3 @@ func buildUnboundData(cfg *config.Config) UnboundData {
 	}
 }
 
-// unboundAccessNets returns the subnets allowed to query Unbound.
-// Same logic as chronyAllowNets: non-WAN interfaces + VLANs.
-func unboundAccessNets(cfg *config.Config) []string {
-	var nets []string
-	for _, iface := range cfg.Network.Interfaces {
-		if iface.Zone == "wan" {
-			continue
-		}
-		if iface.IPv4Mode == "static" && iface.IPv4Address != "" {
-			_, ipnet, err := net.ParseCIDR(iface.IPv4Address)
-			if err == nil {
-				nets = append(nets, ipnet.String())
-			}
-		}
-	}
-	for _, vlan := range cfg.Network.VLANs {
-		if vlan.Subnet != "" {
-			_, ipnet, err := net.ParseCIDR(vlan.Subnet)
-			if err == nil {
-				nets = append(nets, ipnet.String())
-			}
-		}
-	}
-	return nets
-}

@@ -122,6 +122,33 @@ func (e *Engine) outputPath(filename string) string {
 	return filepath.Join(e.outputDir, filename)
 }
 
+// localSubnets returns the CIDR subnets from non-WAN interfaces and VLANs.
+// Used by chrony (NTP allow) and unbound (access-control) to determine
+// which local networks should be allowed to query local services.
+func localSubnets(cfg *config.Config) []string {
+	var nets []string
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone == "wan" {
+			continue
+		}
+		if iface.IPv4Mode == "static" && iface.IPv4Address != "" {
+			_, ipnet, err := net.ParseCIDR(iface.IPv4Address)
+			if err == nil {
+				nets = append(nets, ipnet.String())
+			}
+		}
+	}
+	for _, vlan := range cfg.Network.VLANs {
+		if vlan.Subnet != "" {
+			_, ipnet, err := net.ParseCIDR(vlan.Subnet)
+			if err == nil {
+				nets = append(nets, ipnet.String())
+			}
+		}
+	}
+	return nets
+}
+
 // templateFuncMap returns the shared template helper functions.
 func templateFuncMap() template.FuncMap {
 	return template.FuncMap{
@@ -143,7 +170,7 @@ func templateFuncMap() template.FuncMap {
 		"cidrToMask": func(cidr string) string {
 			_, ipnet, err := net.ParseCIDR(cidr)
 			if err != nil {
-				return "255.255.255.0"
+				return ""
 			}
 			mask := ipnet.Mask
 			return fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])

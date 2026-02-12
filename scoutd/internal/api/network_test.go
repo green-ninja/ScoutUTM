@@ -124,6 +124,42 @@ func TestDeleteZone_ProtectBuiltin(t *testing.T) {
 	}
 }
 
+func TestDeleteZone_ReferencedByForwarding(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+	router := srv.Router()
+
+	// Create a "guest" zone.
+	zone := config.ZoneConfig{Name: "guest", InputPolicy: "drop", ForwardPolicy: "drop", OutputPolicy: "accept"}
+	body, _ := json.Marshal(zone)
+	req := httptest.NewRequest("POST", "/api/v1/network/zones", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create zone: status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	// Add a forwarding rule referencing "guest".
+	cfg, _ := srv.Config.Current().DeepCopy()
+	cfg.Firewall.Forwardings = append(cfg.Firewall.Forwardings, config.ForwardingRule{Src: "guest", Dest: "wan"})
+	// Add an interface so the forwarding validates.
+	cfg.Network.Interfaces = append(cfg.Network.Interfaces, config.InterfaceConfig{Name: "eth2", Zone: "guest", Type: "ethernet", IPv4Mode: "static", IPv4Address: "10.0.0.1/24"})
+	srv.applyConfig(cfg)
+
+	// Try to delete the zone — should fail with 409 Conflict.
+	req = httptest.NewRequest("DELETE", "/api/v1/network/zones/guest", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("DELETE zone with dependents: status = %d, want 409, body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestDeleteZone_NotFound(t *testing.T) {
 	srv, cleanup := testServer(t)
 	defer cleanup()

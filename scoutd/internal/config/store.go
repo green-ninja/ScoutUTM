@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -55,15 +56,20 @@ func (s *Store) Load(createDefault bool) error {
 	return nil
 }
 
-// Current returns a copy of the current config.
+// Current returns a deep copy of the current config.
+// Deep copy is necessary because Config contains slices; a shallow copy
+// would share backing arrays and risk mutation of the live config.
 func (s *Store) Current() *Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.current == nil {
 		return nil
 	}
-	cp := *s.current
-	return &cp
+	cp, err := s.current.DeepCopy()
+	if err != nil {
+		return nil
+	}
+	return cp
 }
 
 // Save writes the current config atomically.
@@ -98,9 +104,11 @@ func (s *Store) CommitPending() error {
 		return fmt.Errorf("parsing pending config: %w", err)
 	}
 
-	// Backup current config (best-effort).
+	// Backup current config (best-effort, but log failures).
 	if s.current != nil {
-		_ = s.writeConfigLocked(s.backupPath, s.current)
+		if err := s.writeConfigLocked(s.backupPath, s.current); err != nil {
+			log.Printf("warning: failed to write config backup: %v", err)
+		}
 	}
 
 	// Atomic rename pending → live.
@@ -185,6 +193,11 @@ func atomicWriteFile(path string, cfg *Config) error {
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("closing temp file: %w", err)
+	}
+	// Config files contain secrets (admin_hash, WireGuard private key).
+	if err := os.Chmod(tmpName, 0600); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("setting file permissions: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)

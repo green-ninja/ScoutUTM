@@ -104,13 +104,13 @@ func TestRateLimiter_AllowsDifferentIP(t *testing.T) {
 func TestRateLimiter_GlobalLimit(t *testing.T) {
 	rl := NewLoginRateLimiter()
 
-	// 20 failures from different IPs.
-	for i := 0; i < 20; i++ {
-		rl.RecordFailure(fmt.Sprintf("192.168.1.%d", i))
+	// 100 failures from different IPs to hit the global limit.
+	for i := 0; i < 100; i++ {
+		rl.RecordFailure(fmt.Sprintf("10.%d.%d.%d", i/256/256%256, i/256%256, i%256))
 	}
 
-	// 21st from a new IP should be blocked by global limit.
-	if rl.Allow("10.0.0.1") {
+	// 101st from a new IP should be blocked by global limit.
+	if rl.Allow("172.16.0.1") {
 		t.Error("should block after global limit reached")
 	}
 }

@@ -180,6 +180,83 @@ func TestCRUDPortForwards(t *testing.T) {
 	}
 }
 
+func TestUpdatePortForward(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+	router := srv.Router()
+
+	// Create a port forward first.
+	pf := config.PortForward{Name: "HTTP", Proto: "tcp", SrcPort: 80, DestIP: "192.168.1.100", DestPort: 8080}
+	body, _ := json.Marshal(pf)
+	req := httptest.NewRequest("POST", "/api/v1/firewall/port-forwards", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /firewall/port-forwards: status = %d", w.Code)
+	}
+
+	// Update it.
+	pf.DestPort = 9090
+	pf.Name = "HTTP-updated"
+	body, _ = json.Marshal(pf)
+	req = httptest.NewRequest("PUT", "/api/v1/firewall/port-forwards/0", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /firewall/port-forwards/0: status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	// Verify update took effect.
+	req = httptest.NewRequest("GET", "/api/v1/firewall/port-forwards", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var pfs []config.PortForward
+	json.Unmarshal(w.Body.Bytes(), &pfs)
+	if len(pfs) != 1 || pfs[0].DestPort != 9090 {
+		t.Errorf("port forward not updated: got %+v", pfs)
+	}
+}
+
+func TestUpdatePortForward_NotFound(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	pf := config.PortForward{Name: "HTTP", Proto: "tcp", SrcPort: 80, DestIP: "192.168.1.100", DestPort: 8080}
+	body, _ := json.Marshal(pf)
+	req := httptest.NewRequest("PUT", "/api/v1/firewall/port-forwards/99", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("PUT nonexistent port forward: status = %d, want 404", w.Code)
+	}
+}
+
+func TestDeleteRule_NegativeIndex(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	req := httptest.NewRequest("DELETE", "/api/v1/firewall/rules/-1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("DELETE negative index: status = %d, want 404", w.Code)
+	}
+}
+
 func TestCreateRule_InvalidPort(t *testing.T) {
 	srv, cleanup := testServer(t)
 	defer cleanup()

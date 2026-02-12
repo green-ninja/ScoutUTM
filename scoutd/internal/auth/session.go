@@ -41,12 +41,15 @@ type LoginRateLimiter struct {
 }
 
 // NewLoginRateLimiter creates a rate limiter with PLAN-specified defaults.
+// Global limit is set high (100/min) to avoid a DoS amplification vector
+// where an attacker hitting the global limit locks out legitimate users.
+// Per-IP limiting (5/min + 5min block) is the primary brute-force defense.
 func NewLoginRateLimiter() *LoginRateLimiter {
 	return &LoginRateLimiter{
 		perIP:    make(map[string]*loginAttempt),
 		global:   &loginAttempt{},
 		maxPerIP: 5,
-		maxGlob:  20,
+		maxGlob:  100,
 		window:   1 * time.Minute,
 		blockDur: 5 * time.Minute,
 	}

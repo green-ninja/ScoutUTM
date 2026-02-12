@@ -157,6 +157,47 @@ func TestAffectedDaemons_NetworkChange_TriggersUnbound(t *testing.T) {
 	}
 }
 
+func TestAffectedDaemons_IDSChange(t *testing.T) {
+	old := config.DefaultConfig()
+	new_, _ := old.DeepCopy()
+	new_.IDS.Mode = "ips"
+
+	daemons := affectedDaemons(old, new_)
+	foundNftables := false
+	foundSuricata := false
+	for _, d := range daemons {
+		if d == "nftables" {
+			foundNftables = true
+		}
+		if d == "suricata" {
+			foundSuricata = true
+		}
+	}
+	if !foundNftables {
+		t.Error("expected nftables in affected daemons for IDS change")
+	}
+	if !foundSuricata {
+		t.Error("expected suricata in affected daemons for IDS change")
+	}
+}
+
+func TestAffectedDaemons_VPNChange(t *testing.T) {
+	old := config.DefaultConfig()
+	new_, _ := old.DeepCopy()
+	new_.VPN.WireGuard.Enabled = true
+
+	daemons := affectedDaemons(old, new_)
+	found := false
+	for _, d := range daemons {
+		if d == "wireguard" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected wireguard in affected daemons for VPN change")
+	}
+}
+
 func TestAffectedDaemons_NoChange(t *testing.T) {
 	old := config.DefaultConfig()
 	new_, _ := old.DeepCopy()

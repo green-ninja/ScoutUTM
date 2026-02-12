@@ -44,24 +44,24 @@ func (s *Server) applyConfig(newCfg *config.Config) error {
 
 	// Phase 2: Render + reload.
 	if err := s.Render.RenderDaemons(newCfg, daemons); err != nil {
-		s.rollback(oldCfg)
+		s.rollback(oldCfg, daemons)
 		return fmt.Errorf("rendering configs: %w", err)
 	}
 
 	if err := s.Services.ReloadDaemons(daemons); err != nil {
-		s.rollback(oldCfg)
+		s.rollback(oldCfg, daemons)
 		return fmt.Errorf("reloading daemons: %w", err)
 	}
 
 	// Post-apply health check (PLAN section 4.4 step 9).
 	if err := s.Services.HealthCheck(daemons); err != nil {
-		s.rollback(oldCfg)
+		s.rollback(oldCfg, daemons)
 		return fmt.Errorf("post-apply health check: %w", err)
 	}
 
 	// Phase 3: Commit.
 	if err := s.Config.CommitPending(); err != nil {
-		s.rollback(oldCfg)
+		s.rollback(oldCfg, daemons)
 		return fmt.Errorf("committing config: %w", err)
 	}
 
@@ -83,12 +83,17 @@ func (s *Server) broadcastConfigChange(affectedDaemons []string) {
 	s.Hub.Broadcast(msg)
 }
 
-// rollback re-renders from the old config and removes the pending file.
-func (s *Server) rollback(oldCfg *config.Config) {
+// rollback re-renders from the old config, reloads all affected daemons,
+// and removes the pending file. Per PLAN section 4.4: on failure, re-render
+// ALL templates from live config, reload ALL daemons, then delete pending.
+func (s *Server) rollback(oldCfg *config.Config, daemons []string) {
 	log.Println("rolling back config apply")
 	if oldCfg != nil {
 		if err := s.Render.RenderAll(oldCfg); err != nil {
 			log.Printf("rollback render error: %v", err)
+		}
+		if err := s.Services.ReloadDaemons(daemons); err != nil {
+			log.Printf("rollback reload error: %v", err)
 		}
 	}
 	if err := s.Config.RollbackPending(); err != nil {
@@ -125,6 +130,16 @@ func affectedDaemons(old, new *config.Config) []string {
 		daemons = append(daemons, "unbound")
 	}
 
+	// suricata: affected by IDS config changes (mode, rulesets, home_net, suppressed).
+	if !reflect.DeepEqual(old.IDS, new.IDS) {
+		daemons = append(daemons, "suricata")
+	}
+
+	// wireguard: affected by VPN config changes (peers, listen port, address).
+	if !reflect.DeepEqual(old.VPN, new.VPN) {
+		daemons = append(daemons, "wireguard")
+	}
+
 	return daemons
 }
 
@@ -138,6 +153,8 @@ func (e *ValidationErrors) Error() string {
 }
 
 // handleApplyError writes the appropriate error response for an apply failure.
+// Validation errors return details; other errors return a generic message and
+// log the real error server-side to avoid leaking internal paths and state.
 func handleApplyError(w http.ResponseWriter, err error) {
 	if ve, ok := err.(*ValidationErrors); ok {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
@@ -146,7 +163,8 @@ func handleApplyError(w http.ResponseWriter, err error) {
 		})
 		return
 	}
+	log.Printf("config apply error: %v", err)
 	writeJSON(w, http.StatusInternalServerError, map[string]string{
-		"error": err.Error(),
+		"error": "config apply failed",
 	})
 }

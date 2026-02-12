@@ -51,6 +51,7 @@ func (s *Server) Router() chi.Router {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(maxBodySize(1 << 20)) // 1MB request body limit
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Unauthenticated routes.
@@ -198,4 +199,14 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// maxBodySize limits the size of incoming request bodies.
+func maxBodySize(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+			next.ServeHTTP(w, r)
+		})
+	}
 }

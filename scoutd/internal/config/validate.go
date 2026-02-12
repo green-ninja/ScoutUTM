@@ -17,7 +17,7 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
-var hostnameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9\-]{0,62}$`)
+var hostnameRe = regexp.MustCompile(`^[a-zA-Z]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
 var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 
 // Validate checks a Config for semantic errors and returns all violations.
@@ -39,8 +39,9 @@ func Validate(cfg *Config) []ValidationError {
 		errs = append(errs, ValidationError{"system.timezone", "must not be empty"})
 	}
 
-	// Network — unique zone names.
+	// Network — unique zone names + valid policies.
 	zoneNames := make(map[string]bool)
+	validPolicies := map[string]bool{"accept": true, "drop": true, "reject": true}
 	for i, z := range cfg.Network.Zones {
 		if z.Name == "" {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].name", i), "must not be empty"})
@@ -50,6 +51,16 @@ func Validate(cfg *Config) []ValidationError {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].name", i), fmt.Sprintf("duplicate zone name %q", z.Name)})
 		}
 		zoneNames[z.Name] = true
+
+		if !validPolicies[z.InputPolicy] {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].input_policy", i), "must be \"accept\", \"drop\", or \"reject\""})
+		}
+		if !validPolicies[z.ForwardPolicy] {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].forward_policy", i), "must be \"accept\", \"drop\", or \"reject\""})
+		}
+		if !validPolicies[z.OutputPolicy] {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].output_policy", i), "must be \"accept\", \"drop\", or \"reject\""})
+		}
 	}
 
 	// Interfaces must reference valid zones.
@@ -141,6 +152,23 @@ func Validate(cfg *Config) []ValidationError {
 	// IDS.
 	if cfg.IDS.Mode != "ids" && cfg.IDS.Mode != "ips" {
 		errs = append(errs, ValidationError{"ids.mode", "must be \"ids\" or \"ips\""})
+	}
+	for i, cidr := range cfg.IDS.HomeNet {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			errs = append(errs, ValidationError{fmt.Sprintf("ids.home_net[%d]", i), fmt.Sprintf("invalid CIDR %q", cidr)})
+		}
+	}
+
+	// VPN: WireGuard peer AllowedIPs must be valid CIDR.
+	for i, peer := range cfg.VPN.WireGuard.Peers {
+		for j, cidr := range peer.AllowedIPs {
+			if _, _, err := net.ParseCIDR(cidr); err != nil {
+				errs = append(errs, ValidationError{
+					fmt.Sprintf("vpn.wireguard.peers[%d].allowed_ips[%d]", i, j),
+					fmt.Sprintf("invalid CIDR %q", cidr),
+				})
+			}
+		}
 	}
 
 	// Update.

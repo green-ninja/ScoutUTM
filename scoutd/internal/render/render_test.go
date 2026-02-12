@@ -99,3 +99,52 @@ func TestTemplateFuncMap_DhcpEnd(t *testing.T) {
 		t.Errorf("dhcpEnd = %q, want 192.168.1.253", got)
 	}
 }
+
+func TestTemplateFuncMap_CidrToMask_InvalidReturnsEmpty(t *testing.T) {
+	fm := templateFuncMap()
+	fn := fm["cidrToMask"].(func(string) string)
+	if got := fn("not-a-cidr"); got != "" {
+		t.Errorf("cidrToMask(invalid) = %q, want empty string", got)
+	}
+}
+
+func TestTemplateFuncMap_CidrToMask_Valid(t *testing.T) {
+	fm := templateFuncMap()
+	fn := fm["cidrToMask"].(func(string) string)
+	if got := fn("192.168.1.1/24"); got != "255.255.255.0" {
+		t.Errorf("cidrToMask = %q, want 255.255.255.0", got)
+	}
+}
+
+func TestLocalSubnets(t *testing.T) {
+	cfg := testConfig()
+	nets := localSubnets(cfg)
+	// Default config has eth1 (lan, 192.168.1.1/24) — should extract the /24 subnet.
+	if len(nets) != 1 {
+		t.Fatalf("localSubnets: got %d nets, want 1", len(nets))
+	}
+	if nets[0] != "192.168.1.0/24" {
+		t.Errorf("localSubnets[0] = %q, want 192.168.1.0/24", nets[0])
+	}
+}
+
+func TestLocalSubnets_ExcludesWAN(t *testing.T) {
+	cfg := testConfig()
+	// WAN interface should not appear in localSubnets.
+	for _, n := range localSubnets(cfg) {
+		if n == "wan" {
+			t.Error("localSubnets should not include WAN interface")
+		}
+	}
+}
+
+func TestLocalSubnets_IncludesVLAN(t *testing.T) {
+	cfg := testConfig()
+	cfg.Network.VLANs = append(cfg.Network.VLANs, config.VLANConfig{
+		ID: 100, Parent: "eth1", Zone: "guest", Subnet: "10.0.100.1/24",
+	})
+	nets := localSubnets(cfg)
+	if len(nets) != 2 {
+		t.Fatalf("localSubnets with VLAN: got %d nets, want 2", len(nets))
+	}
+}

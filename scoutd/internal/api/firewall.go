@@ -18,6 +18,7 @@ func firewallRoutes(r chi.Router, s *Server) {
 	r.Delete("/firewall/rules/{id}", s.handleDeleteRule)
 	r.Get("/firewall/port-forwards", s.handleGetPortForwards)
 	r.Post("/firewall/port-forwards", s.handleCreatePortForward)
+	r.Put("/firewall/port-forwards/{id}", s.handleUpdatePortForward)
 	r.Delete("/firewall/port-forwards/{id}", s.handleDeletePortForward)
 }
 
@@ -157,6 +158,39 @@ func (s *Server) handleCreatePortForward(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusCreated, pf)
+}
+
+func (s *Server) handleUpdatePortForward(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid port forward id"})
+		return
+	}
+
+	var pf config.PortForward
+	if err := json.NewDecoder(r.Body).Decode(&pf); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	cfg, err := s.Config.Current().DeepCopy()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	if id < 0 || id >= len(cfg.Firewall.PortForwards) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "port forward not found"})
+		return
+	}
+	cfg.Firewall.PortForwards[id] = pf
+
+	if err := s.applyConfig(cfg); err != nil {
+		handleApplyError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pf)
 }
 
 func (s *Server) handleDeletePortForward(w http.ResponseWriter, r *http.Request) {

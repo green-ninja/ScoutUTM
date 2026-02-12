@@ -120,6 +120,65 @@ func TestValidate_ForwardingZoneNoInterfaces(t *testing.T) {
 	}
 }
 
+func TestValidate_HostnameTrailingHyphen(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.System.Hostname = "scout-"
+	errs := Validate(cfg)
+	if !hasField(errs, "system.hostname") {
+		t.Error("expected error for hostname with trailing hyphen")
+	}
+}
+
+func TestValidate_HostnameSingleChar(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.System.Hostname = "s"
+	errs := Validate(cfg)
+	if hasField(errs, "system.hostname") {
+		t.Error("single-letter hostname should be valid")
+	}
+}
+
+func TestValidate_InvalidZonePolicy(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Network.Zones[0].InputPolicy = "invalid"
+	errs := Validate(cfg)
+	if !hasField(errs, "network.zones[0].input_policy") {
+		t.Error("expected error for invalid input policy")
+	}
+}
+
+func TestValidate_InvalidIDSHomeNet(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IDS.HomeNet = []string{"not-a-cidr"}
+	errs := Validate(cfg)
+	if !hasField(errs, "ids.home_net[0]") {
+		t.Error("expected error for invalid IDS home_net CIDR")
+	}
+}
+
+func TestValidate_InvalidWireGuardAllowedIPs(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.VPN.WireGuard.Peers = []WireGuardPeer{
+		{Name: "test", PublicKey: "key", AllowedIPs: []string{"bad-cidr"}, TunnelIP: "10.0.0.2"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "vpn.wireguard.peers[0].allowed_ips[0]") {
+		t.Error("expected error for invalid WireGuard AllowedIPs CIDR")
+	}
+}
+
+func TestValidate_ValidCIDRValues(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IDS.HomeNet = []string{"192.168.1.0/24", "10.0.0.0/8"}
+	cfg.VPN.WireGuard.Peers = []WireGuardPeer{
+		{Name: "test", PublicKey: "key", AllowedIPs: []string{"0.0.0.0/0"}, TunnelIP: "10.0.0.2"},
+	}
+	errs := Validate(cfg)
+	if hasField(errs, "ids.home_net[0]") || hasField(errs, "vpn.wireguard.peers[0].allowed_ips[0]") {
+		t.Error("valid CIDRs should not produce errors")
+	}
+}
+
 func hasField(errs []ValidationError, field string) bool {
 	for _, e := range errs {
 		if e.Field == field {
