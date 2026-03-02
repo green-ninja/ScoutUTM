@@ -120,3 +120,68 @@ export interface HealthResponse {
   uptime: number
   version: string
 }
+
+export interface Device {
+  mac: string
+  ip: string
+  hostname: string
+  zone: string
+  online: boolean
+  last_seen: string
+  name: string
+  profile_id: string
+}
+
+export interface IDSAlert {
+  timestamp: string
+  src_ip: string
+  src_port: number
+  dest_ip: string
+  dest_port: number
+  proto: string
+  event_type: string
+  alert: {
+    action: string
+    signature_id: number
+    signature: string
+    category: string
+    severity: number
+  }
+}
+
+export interface ParentalConfig {
+  profiles: ParentalProfile[]
+  devices: ParentalDevice[]
+}
+
+export interface ParentalProfile {
+  id: string
+  name: string
+  block_categories: string[]
+  safe_search: boolean
+  youtube_restricted: boolean
+  schedule: Schedule
+}
+
+export interface ParentalDevice {
+  mac: string
+  profile_id: string
+}
+
+export interface Schedule {
+  enabled: boolean
+  start_time: string
+  end_time: string
+  days: string[]
+}
+
+export interface WizardStepResponse {
+  status: string
+  interfaces?: { name: string; zone: string; type: string }[]
+}
+
+export interface SystemAbout {
+  version: string
+  uptime: number
+  go_version: string
+}

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Bash(/usr/local/go/bin/go test:*)"
+      "Bash(/usr/local/go/bin/go test:*)",
+      "Bash(/usr/local/go/bin/go build:*)"
     ]
   }
 }

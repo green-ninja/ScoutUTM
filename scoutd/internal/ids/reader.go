@@ -96,6 +96,9 @@ type Reader struct {
 	alerts     *RingBuffer
 	devMode    bool
 
+	// OnAlert is called when a new alert is parsed, before ring buffer insert.
+	OnAlert func(Alert)
+
 	logMu   sync.Mutex
 	logFile *os.File
 }
@@ -206,6 +209,11 @@ func (r *Reader) processLine(line []byte) {
 		Proto:     ev.Proto,
 		EventType: ev.EventType,
 		Alert:     ev.Alert,
+	}
+
+	// Notify callback before ring buffer insert.
+	if r.OnAlert != nil {
+		r.OnAlert(alert)
 	}
 
 	r.alerts.Add(alert)

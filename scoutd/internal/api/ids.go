@@ -44,6 +44,10 @@ func (s *Server) handlePutIDS(w http.ResponseWriter, r *http.Request) {
 		cfg.IDS.Enabled = *update.Enabled
 	}
 	if update.Mode != nil {
+		if *update.Mode != "ids" && *update.Mode != "ips" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be \"ids\" or \"ips\""})
+			return
+		}
 		cfg.IDS.Mode = *update.Mode
 	}
 	if update.Rulesets != nil {

@@ -30,9 +30,14 @@ async function handleLogout() {
 
       <nav class="flex-1 py-4 px-3 space-y-1">
         <NavLink to="/dashboard" label="Dashboard" />
+        <NavLink to="/devices" label="Devices" />
         <NavLink to="/firewall" label="Firewall" />
         <NavLink to="/dns" label="DNS" />
         <NavLink to="/vpn" label="VPN" />
+        <NavLink to="/ids" label="IDS Alerts" />
+        <NavLink to="/parental" label="Parental" />
+        <NavLink to="/network" label="Network" />
+        <NavLink to="/system" label="System" />
       </nav>
 
       <div class="px-4 py-4 border-t border-scout-700">

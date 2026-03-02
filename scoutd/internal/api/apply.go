@@ -126,9 +126,10 @@ func affectedDaemons(old, new *config.Config) []string {
 		daemons = append(daemons, "chrony")
 	}
 
-	// unbound: affected by DNS, Network (access-control subnets), Parental (future: per-device tags) changes.
+	// unbound: affected by DNS, Network (access-control subnets), Parental (per-device tags) changes.
 	if !reflect.DeepEqual(old.DNS, new.DNS) ||
-		!reflect.DeepEqual(old.Network, new.Network) {
+		!reflect.DeepEqual(old.Network, new.Network) ||
+		!reflect.DeepEqual(old.Parental, new.Parental) {
 		daemons = append(daemons, "unbound")
 	}
 

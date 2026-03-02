@@ -116,6 +116,91 @@ func TestHub_Broadcast_DropsSlowClient(t *testing.T) {
 	}
 }
 
+func TestHub_BroadcastDevices(t *testing.T) {
+	h := NewHub()
+	c := &Client{Send: make(chan []byte, 16)}
+	h.Register(c)
+
+	devices := []map[string]string{
+		{"mac": "aa:bb:cc:dd:ee:01", "ip": "192.168.1.100"},
+	}
+	h.BroadcastDevices(devices)
+
+	select {
+	case msg := <-c.Send:
+		if len(msg) == 0 {
+			t.Error("got empty message")
+		}
+		// Should be JSON with type "devices".
+		if !contains(msg, `"type":"devices"`) {
+			t.Errorf("message missing type:devices: %s", msg)
+		}
+	case <-time.After(time.Second):
+		t.Error("client did not receive devices broadcast")
+	}
+}
+
+func TestHub_BroadcastAlert(t *testing.T) {
+	h := NewHub()
+	c := &Client{Send: make(chan []byte, 16)}
+	h.Register(c)
+
+	alert := map[string]interface{}{"signature": "ET TROJAN", "severity": 1}
+	h.BroadcastAlert(alert)
+
+	select {
+	case msg := <-c.Send:
+		if !contains(msg, `"type":"alert"`) {
+			t.Errorf("message missing type:alert: %s", msg)
+		}
+	case <-time.After(time.Second):
+		t.Error("client did not receive alert broadcast")
+	}
+}
+
+func TestHub_AlertRateLimit(t *testing.T) {
+	h := NewHub()
+	c := &Client{Send: make(chan []byte, 256)}
+	h.Register(c)
+
+	// Send 20 alerts rapidly — should be rate limited to ~10.
+	for i := 0; i < 20; i++ {
+		h.BroadcastAlert(map[string]int{"i": i})
+	}
+
+	// Drain and count.
+	count := 0
+	for {
+		select {
+		case <-c.Send:
+			count++
+		default:
+			goto done
+		}
+	}
+done:
+	if count > 11 { // Allow small tolerance.
+		t.Errorf("received %d alerts, expected <= 11 (rate limited to 10/sec)", count)
+	}
+	if count < 5 {
+		t.Errorf("received only %d alerts, expected at least some to go through", count)
+	}
+}
+
+func contains(b []byte, s string) bool {
+	return len(b) > 0 && len(s) > 0 && string(b) != "" &&
+		len(b) >= len(s) && stringContains(string(b), s)
+}
+
+func stringContains(haystack, needle string) bool {
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHub_StatsInterval(t *testing.T) {
 	h := NewHub()
 

@@ -130,3 +130,152 @@ func TestPatchSystem_InvalidHostname(t *testing.T) {
 		t.Errorf("PATCH /system with empty hostname: status = %d, want 422", w.Code)
 	}
 }
+
+func TestSystem_About(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	req := httptest.NewRequest("GET", "/api/v1/system/about", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("about: status = %d, want 200", w.Code)
+	}
+
+	var resp aboutResponse
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp.Version != "0.1.0-test" {
+		t.Errorf("version = %q, want 0.1.0-test", resp.Version)
+	}
+	if resp.GoVersion == "" {
+		t.Error("go_version is empty")
+	}
+}
+
+func TestSystem_Backup(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	req := httptest.NewRequest("GET", "/api/v1/system/backup", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("backup: status = %d, want 200", w.Code)
+	}
+
+	if ct := w.Header().Get("Content-Disposition"); ct == "" {
+		t.Error("missing Content-Disposition header")
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Errorf("backup is not valid JSON: %v", err)
+	}
+}
+
+func TestSystem_Restore(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	cfg := srv.Config.Current()
+	cfg.System.Hostname = "restored-utm"
+	data, _ := json.Marshal(cfg)
+
+	req := httptest.NewRequest("POST", "/api/v1/system/restore", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore: status = %d, want 200. Body: %s", w.Code, w.Body.String())
+	}
+
+	newCfg := srv.Config.Current()
+	if newCfg.System.Hostname != "restored-utm" {
+		t.Errorf("hostname = %q, want restored-utm", newCfg.System.Hostname)
+	}
+}
+
+func TestSystem_Reboot_DevMode(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	req := httptest.NewRequest("POST", "/api/v1/system/reboot", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("reboot dev-mode: status = %d, want 200", w.Code)
+	}
+}
+
+func TestSystem_ChangePassword(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+	token := loginAndGetToken(t, srv, "testpassword")
+
+	body, _ := json.Marshal(map[string]string{
+		"current":      "testpassword",
+		"new_password": "newpassword123",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/system/password", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("change password: status = %d, want 200. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSystem_ChangePassword_WrongCurrent(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+	token := loginAndGetToken(t, srv, "testpassword")
+
+	body, _ := json.Marshal(map[string]string{
+		"current":      "wrongpassword",
+		"new_password": "newpassword123",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/system/password", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("wrong current password: status = %d, want 401", w.Code)
+	}
+}
+
+func TestSystem_RegenerateCert_DevMode(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	req := httptest.NewRequest("POST", "/api/v1/system/regenerate-cert", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("regenerate cert: status = %d, want 200", w.Code)
+	}
+}

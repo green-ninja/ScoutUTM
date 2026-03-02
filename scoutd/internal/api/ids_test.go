@@ -73,8 +73,8 @@ func TestPutIDS_InvalidMode(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, req)
 
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Errorf("PUT /ids invalid mode: status = %d, want 422", w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("PUT /ids invalid mode: status = %d, want 400", w.Code)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
 	"github.com/scoututm/scoutd/internal/ids"
+	"github.com/scoututm/scoutd/internal/netmon"
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
@@ -30,7 +31,9 @@ func testServer(t *testing.T) (*Server, func()) {
 	engine := render.NewEngine(tmplDir, outputDir, true)
 	svcMgr := service.NewManager(true)
 	eveReader := ids.NewReader("", "", true)
-	srv := NewServer(store, sessions, hub, engine, svcMgr, eveReader, true, "0.1.0-test")
+	scanner := netmon.NewScanner(true, "")
+	scanner.Scan()
+	srv := NewServer(store, sessions, hub, engine, svcMgr, eveReader, scanner, true, "0.1.0-test")
 	return srv, func() {}
 }
 
@@ -154,7 +157,7 @@ func TestAuthMiddleware_BlocksWithoutToken(t *testing.T) {
 	}
 }
 
-func TestStubEndpoint_Returns501(t *testing.T) {
+func TestDevicesEndpoint_Returns200(t *testing.T) {
 	srv, cleanup := testServer(t)
 	defer cleanup()
 	setAdminPassword(t, srv, "testpassword")
@@ -165,8 +168,8 @@ func TestStubEndpoint_Returns501(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("stub endpoint: status = %d, want 501", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("devices endpoint: status = %d, want 200", w.Code)
 	}
 }
 

@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -11,12 +12,17 @@ const maxClients = 10
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[*Client]bool
+
+	// Alert rate limiting: per-client token buckets.
+	alertMu     sync.Mutex
+	alertTokens map[*Client]*tokenBucket
 }
 
 // NewHub creates a Hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[*Client]bool),
+		clients:     make(map[*Client]bool),
+		alertTokens: make(map[*Client]*tokenBucket),
 	}
 }
 
@@ -28,6 +34,11 @@ func (h *Hub) Register(c *Client) bool {
 		return false
 	}
 	h.clients[c] = true
+
+	h.alertMu.Lock()
+	h.alertTokens[c] = newTokenBucket(10, 10) // 10 alerts/sec, burst 10
+	h.alertMu.Unlock()
+
 	return true
 }
 
@@ -39,6 +50,10 @@ func (h *Hub) Unregister(c *Client) {
 		delete(h.clients, c)
 		close(c.Send)
 	}
+
+	h.alertMu.Lock()
+	delete(h.alertTokens, c)
+	h.alertMu.Unlock()
 }
 
 // Broadcast sends a message to all connected clients.
@@ -51,6 +66,50 @@ func (h *Hub) Broadcast(msg []byte) {
 		case c.Send <- msg:
 		default:
 			// Client too slow, drop message.
+		}
+	}
+}
+
+// BroadcastDevices sends a devices update to all clients.
+func (h *Hub) BroadcastDevices(devices interface{}) {
+	msg, err := json.Marshal(map[string]interface{}{
+		"type": "devices",
+		"data": devices,
+	})
+	if err != nil {
+		return
+	}
+	h.Broadcast(msg)
+}
+
+// BroadcastAlert sends an alert to all clients, subject to per-client rate limiting.
+// Max 10 alerts/sec per client. Excess silently dropped.
+func (h *Hub) BroadcastAlert(alert interface{}) {
+	msg, err := json.Marshal(map[string]interface{}{
+		"type": "alert",
+		"data": alert,
+	})
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	h.alertMu.Lock()
+	defer h.alertMu.Unlock()
+
+	for c := range h.clients {
+		bucket, ok := h.alertTokens[c]
+		if !ok {
+			continue
+		}
+		if !bucket.allow() {
+			continue // Rate limited.
+		}
+		select {
+		case c.Send <- msg:
+		default:
 		}
 	}
 }
@@ -69,4 +128,37 @@ func (h *Hub) StatsInterval() time.Duration {
 		return 2 * time.Second
 	}
 	return 5 * time.Second
+}
+
+// tokenBucket implements a simple token-bucket rate limiter.
+type tokenBucket struct {
+	rate     float64
+	burst    float64
+	tokens   float64
+	lastTime time.Time
+}
+
+func newTokenBucket(rate, burst float64) *tokenBucket {
+	return &tokenBucket{
+		rate:     rate,
+		burst:    burst,
+		tokens:   burst,
+		lastTime: time.Now(),
+	}
+}
+
+func (tb *tokenBucket) allow() bool {
+	now := time.Now()
+	elapsed := now.Sub(tb.lastTime).Seconds()
+	tb.tokens += elapsed * tb.rate
+	if tb.tokens > tb.burst {
+		tb.tokens = tb.burst
+	}
+	tb.lastTime = now
+
+	if tb.tokens < 1 {
+		return false
+	}
+	tb.tokens--
+	return true
 }

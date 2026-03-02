@@ -12,6 +12,11 @@ const router = createRouter({
       component: LoginView,
     },
     {
+      path: '/wizard',
+      name: 'wizard',
+      component: () => import('@/views/SetupWizardView.vue'),
+    },
+    {
       path: '/',
       component: () => import('@/layouts/AppShell.vue'),
       children: [
@@ -39,6 +44,31 @@ const router = createRouter({
           name: 'vpn',
           component: () => import('@/views/VpnView.vue'),
         },
+        {
+          path: 'devices',
+          name: 'devices',
+          component: () => import('@/views/DevicesView.vue'),
+        },
+        {
+          path: 'ids',
+          name: 'ids',
+          component: () => import('@/views/IDSView.vue'),
+        },
+        {
+          path: 'parental',
+          name: 'parental',
+          component: () => import('@/views/ParentalView.vue'),
+        },
+        {
+          path: 'network',
+          name: 'network',
+          component: () => import('@/views/NetworkView.vue'),
+        },
+        {
+          path: 'system',
+          name: 'system',
+          component: () => import('@/views/SystemView.vue'),
+        },
       ],
     },
     {
@@ -50,6 +80,10 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
+
+  // Wizard route: accessible without auth (uses its own auth for API calls).
+  if (to.name === 'wizard') return
+
   if (to.name !== 'login' && !auth.isAuthenticated) {
     return { name: 'login' }
   }

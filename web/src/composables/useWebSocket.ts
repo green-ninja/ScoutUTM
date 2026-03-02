@@ -1,6 +1,8 @@
 import { ref, onUnmounted } from 'vue'
 import { useStatsStore } from '@/stores/stats'
-import type { StatsSnapshot } from '@/api/types'
+import { useDevicesStore } from '@/stores/devices'
+import { useAlertsStore } from '@/stores/alerts'
+import type { StatsSnapshot, Device, IDSAlert } from '@/api/types'
 
 const RECONNECT_DELAY = 3000
 const PING_INTERVAL = 30000
@@ -32,9 +34,26 @@ export function useWebSocket() {
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data)
-        if (msg.type === 'stats') {
-          const stats = useStatsStore()
-          stats.push(msg.data as StatsSnapshot)
+        switch (msg.type) {
+          case 'stats': {
+            const stats = useStatsStore()
+            stats.push(msg.data as StatsSnapshot)
+            break
+          }
+          case 'devices': {
+            const devices = useDevicesStore()
+            devices.push(msg.data as Device[])
+            break
+          }
+          case 'alert': {
+            const alerts = useAlertsStore()
+            alerts.push(msg.data as IDSAlert)
+            break
+          }
+          case 'config_changed':
+            // Views can watch for this via a custom event.
+            window.dispatchEvent(new CustomEvent('scout:config_changed', { detail: msg.daemons }))
+            break
         }
       } catch {
         // Ignore non-JSON messages.

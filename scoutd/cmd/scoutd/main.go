@@ -28,6 +28,7 @@ import (
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
 	"github.com/scoututm/scoutd/internal/ids"
+	"github.com/scoututm/scoutd/internal/netmon"
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/scheduler"
 	"github.com/scoututm/scoutd/internal/service"
@@ -163,6 +164,10 @@ func main() {
 		"/var/lib/scout/suricata/eve.json",
 		devMode,
 	)
+	// Bridge EVE alerts → WebSocket hub.
+	eveReader.OnAlert = func(alert ids.Alert) {
+		hub.BroadcastAlert(alert)
+	}
 	eveCtx, eveCancel := context.WithCancel(context.Background())
 	go eveReader.Run(eveCtx)
 
@@ -189,8 +194,40 @@ func main() {
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	go sched.Start(schedCtx)
 
+	// Network device scanner.
+	scanner := netmon.NewScanner(devMode, "/var/lib/misc/dnsmasq.leases")
+	if err := scanner.Scan(); err != nil {
+		log.Printf("warning: initial device scan: %v", err)
+	}
+	scanCtx, scanCancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		var prevDevices []netmon.Device
+		for {
+			select {
+			case <-scanCtx.Done():
+				return
+			case <-ticker.C:
+				if err := scanner.Scan(); err != nil {
+					log.Printf("device scan: %v", err)
+					continue
+				}
+				devices := scanner.Devices()
+				if !devicesEqual(prevDevices, devices) {
+					msg, _ := json.Marshal(map[string]interface{}{
+						"type": "devices",
+						"data": devices,
+					})
+					hub.Broadcast(msg)
+					prevDevices = devices
+				}
+			}
+		}
+	}()
+
 	// API server.
-	srv := api.NewServer(store, sessions, hub, engine, svcMgr, eveReader, devMode, version)
+	srv := api.NewServer(store, sessions, hub, engine, svcMgr, eveReader, scanner, devMode, version)
 	router := srv.Router()
 
 	// Register cleanup tasks (after srv is created so we can access RateLimiter).
@@ -273,6 +310,7 @@ func main() {
 	statsCancel()
 	eveCancel()
 	schedCancel()
+	scanCancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
@@ -359,4 +397,25 @@ func isFlagSet(name string) bool {
 		}
 	})
 	return found
+}
+
+// devicesEqual compares two device slices for change detection.
+func devicesEqual(a, b []netmon.Device) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[string]netmon.Device, len(a))
+	for _, d := range a {
+		m[d.MAC] = d
+	}
+	for _, d := range b {
+		prev, ok := m[d.MAC]
+		if !ok {
+			return false
+		}
+		if prev.IP != d.IP || prev.Online != d.Online || prev.Hostname != d.Hostname || prev.Name != d.Name || prev.ProfileID != d.ProfileID || prev.Zone != d.Zone {
+			return false
+		}
+	}
+	return true
 }
