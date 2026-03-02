@@ -19,6 +19,7 @@ func (e ValidationError) Error() string {
 
 var hostnameRe = regexp.MustCompile(`^[a-zA-Z]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
 var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+var tagSanitizeRe = regexp.MustCompile(`[^a-z0-9_]`)
 
 // Validate checks a Config for semantic errors and returns all violations.
 func Validate(cfg *Config) []ValidationError {
@@ -228,6 +229,62 @@ func Validate(cfg *Config) []ValidationError {
 					fmt.Sprintf("invalid CIDR %q", cidr),
 				})
 			}
+		}
+	}
+
+	// Parental: profiles.
+	profileIDs := make(map[string]bool)
+	profileNames := make(map[string]bool)
+	profileTagNames := make(map[string]bool) // sanitized tag names for collision detection
+	validParentalCategories := map[string]bool{
+		"social_media": true, "gaming": true, "adult": true, "streaming": true,
+		"gambling": true, "drugs": true, "weapons": true, "malware": true,
+	}
+	for i, p := range cfg.Parental.Profiles {
+		if p.ID == "" {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].id", i), "must not be empty"})
+		} else if profileIDs[p.ID] {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].id", i), fmt.Sprintf("duplicate profile ID %q", p.ID)})
+		}
+		profileIDs[p.ID] = true
+
+		lower := strings.ToLower(p.Name)
+		if p.Name == "" {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), "must not be empty"})
+		} else if profileNames[lower] {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), fmt.Sprintf("duplicate profile name %q", p.Name)})
+		}
+		profileNames[lower] = true
+
+		// Check for sanitized tag collision (e.g. "Kids-Only" and "KidsOnly" both become "kidsonly").
+		if p.Name != "" {
+			tag := tagSanitizeRe.ReplaceAllString(strings.ReplaceAll(lower, " ", "_"), "")
+			if tag == "" {
+				tag = "profile"
+			}
+			if profileTagNames[tag] {
+				errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), fmt.Sprintf("profile name %q produces duplicate DNS tag %q", p.Name, tag)})
+			}
+			profileTagNames[tag] = true
+		}
+
+		for j, cat := range p.BlockCategories {
+			if !validParentalCategories[cat] {
+				errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].block_categories[%d]", i, j), fmt.Sprintf("invalid category %q", cat)})
+			}
+		}
+	}
+
+	// Parental: devices.
+	for i, d := range cfg.Parental.Devices {
+		if d.MAC == "" {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].mac", i), "must not be empty"})
+		}
+		if d.ProfileID != "" && !profileIDs[d.ProfileID] {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].profile_id", i), fmt.Sprintf("references unknown profile %q", d.ProfileID)})
+		}
+		if d.IP != "" && net.ParseIP(d.IP) == nil {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].ip", i), fmt.Sprintf("invalid IP address %q", d.IP)})
 		}
 	}
 

@@ -81,6 +81,69 @@ func TestRenderDnsmasq_NoWAN(t *testing.T) {
 	}
 }
 
+func TestRenderDnsmasq_StaticHosts(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.Parental.Devices = []config.ParentalDevice{
+		{MAC: "aa:bb:cc:dd:ee:01", ProfileID: "prof1", IP: "192.168.1.101"},
+		{MAC: "aa:bb:cc:dd:ee:02", ProfileID: "prof1", IP: "192.168.1.102"},
+	}
+
+	if err := e.RenderDnsmasq(cfg); err != nil {
+		t.Fatalf("RenderDnsmasq: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "dnsmasq.conf"))
+	content := string(data)
+
+	if !strings.Contains(content, "dhcp-host=aa:bb:cc:dd:ee:01,192.168.1.101") {
+		t.Error("expected static host for first device")
+	}
+	if !strings.Contains(content, "dhcp-host=aa:bb:cc:dd:ee:02,192.168.1.102") {
+		t.Error("expected static host for second device")
+	}
+	if !strings.Contains(content, "# Static DHCP reservations for parental controls.") {
+		t.Error("expected static hosts comment")
+	}
+}
+
+func TestRenderDnsmasq_NoStaticHostsWithoutParental(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	// No parental devices.
+
+	if err := e.RenderDnsmasq(cfg); err != nil {
+		t.Fatalf("RenderDnsmasq: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "dnsmasq.conf"))
+	content := string(data)
+
+	if strings.Contains(content, "dhcp-host=") {
+		t.Error("should not have dhcp-host lines without parental devices")
+	}
+}
+
+func TestRenderDnsmasq_SkipEmptyIPDevice(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.Parental.Devices = []config.ParentalDevice{
+		{MAC: "aa:bb:cc:dd:ee:01", ProfileID: "prof1", IP: ""},
+		{MAC: "", ProfileID: "prof1", IP: "192.168.1.102"},
+	}
+
+	if err := e.RenderDnsmasq(cfg); err != nil {
+		t.Fatalf("RenderDnsmasq: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "dnsmasq.conf"))
+	content := string(data)
+
+	if strings.Contains(content, "dhcp-host=") {
+		t.Error("should skip devices with empty MAC or IP")
+	}
+}
+
 func TestRenderDnsmasq_VLAN(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()

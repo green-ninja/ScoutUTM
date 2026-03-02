@@ -6,17 +6,30 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/dnslog"
 )
 
 func dnsRoutes(r chi.Router, s *Server) {
 	r.Get("/dns", s.handleGetDNS)
 	r.Put("/dns", s.handlePutDNS)
-	r.Get("/dns/query-log", handleNotImplemented)
+	r.Get("/dns/query-log", s.handleDNSQueryLog)
 }
 
 func (s *Server) handleGetDNS(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
 	writeJSON(w, http.StatusOK, cfg.DNS)
+}
+
+func (s *Server) handleDNSQueryLog(w http.ResponseWriter, r *http.Request) {
+	if s.DNSLogger == nil {
+		writeJSON(w, http.StatusOK, []struct{}{})
+		return
+	}
+	entries := s.DNSLogger.RecentEntries(100)
+	if entries == nil {
+		entries = make([]dnslog.Entry, 0)
+	}
+	writeJSON(w, http.StatusOK, entries)
 }
 
 func (s *Server) handlePutDNS(w http.ResponseWriter, r *http.Request) {

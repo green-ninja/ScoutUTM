@@ -55,11 +55,46 @@ server:
 {{- end}}
 {{- end}}
 
+{{- if .TagDefinition}}
+
+    # Parental controls — profile tag definitions
+    define-tag: "{{.TagDefinition}}"
+{{- range .DeviceTags}}
+    access-control-tag: {{.IP}}/32 "{{.Tag}}"
+{{- end}}
+{{- end}}
+
+{{- if .SafeSearchOverrides}}
+
+    # Safe search and YouTube restricted mode overrides
+{{- range .SafeSearchOverrides}}
+    local-zone: "{{.Domain}}" redirect
+    local-zone-tag: "{{.Domain}}" "{{.Tags}}"
+    local-data: "{{.Domain}} CNAME {{.Target}}"
+{{- end}}
+{{- end}}
+
+{{- if .ScheduleBlockedIPs}}
+
+    # Schedule-blocked devices — deny all DNS
+{{- range .ScheduleBlockedIPs}}
+    access-control: {{.}}/32 deny
+{{- end}}
+{{- end}}
+
 {{- range .RPZZones}}
 
 rpz:
     name: "{{.Name}}"
     zonefile: "{{.ZoneFile}}"
+{{- end}}
+
+{{- range .ParentalRPZZones}}
+
+rpz:
+    name: "{{.Name}}"
+    zonefile: "{{.ZoneFile}}"
+    tags: "{{.Tags}}"
 {{- end}}
 
 forward-zone:

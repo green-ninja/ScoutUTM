@@ -172,8 +172,8 @@ func TestGetDNSQueryLog_NotImplemented(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("GET /dns/query-log: status = %d, want 501", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("GET /dns/query-log: status = %d, want 200", w.Code)
 	}
 }
 
@@ -199,6 +199,75 @@ func TestPutDNS_DOTAndDOHMutuallyExclusive(t *testing.T) {
 
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("PUT /dns DoT+DoH: status = %d, want 422", w.Code)
+	}
+}
+
+func TestPutDNS_RapidConcurrentChanges(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "test")
+	token := loginAndGetToken(t, srv, "test")
+
+	router := srv.Router()
+
+	// Fire 3 concurrent DNS config updates with different upstream servers.
+	upstreams := [][]string{
+		{"1.1.1.1", "1.0.0.1"},
+		{"8.8.8.8", "8.8.4.4"},
+		{"9.9.9.9", "149.112.112.112"},
+	}
+
+	done := make(chan int, 3)
+	for i, up := range upstreams {
+		go func(idx int, servers []string) {
+			update := config.DNSConfig{
+				Upstream:     servers,
+				QueryLogging: true,
+				CustomBlock:  []string{},
+				CustomAllow:  []string{},
+			}
+			body, _ := json.Marshal(update)
+			req := httptest.NewRequest("PUT", "/api/v1/dns", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code == http.StatusOK {
+				done <- idx
+			} else {
+				done <- -1
+			}
+		}(i, up)
+	}
+
+	// Wait for all 3 to complete.
+	successCount := 0
+	for range 3 {
+		idx := <-done
+		if idx >= 0 {
+			successCount++
+		}
+	}
+
+	if successCount != 3 {
+		t.Errorf("expected 3 successful applies, got %d", successCount)
+	}
+
+	// Final config should be valid and consistent.
+	cfg := srv.Config.Current()
+	if errs := config.Validate(cfg); len(errs) > 0 {
+		t.Errorf("config invalid after concurrent applies: %v", errs)
+	}
+
+	// Upstream should be one of the 3 valid sets (whichever won the race).
+	validUpstream := false
+	for _, up := range upstreams {
+		if len(cfg.DNS.Upstream) == len(up) && cfg.DNS.Upstream[0] == up[0] && cfg.DNS.Upstream[1] == up[1] {
+			validUpstream = true
+			break
+		}
+	}
+	if !validUpstream {
+		t.Errorf("unexpected upstream after concurrent applies: %v", cfg.DNS.Upstream)
 	}
 }
 

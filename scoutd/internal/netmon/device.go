@@ -7,14 +7,15 @@ import (
 
 // Device represents a discovered network device.
 type Device struct {
-	MAC       string    `json:"mac"`
-	IP        string    `json:"ip"`
-	Hostname  string    `json:"hostname"`
-	Zone      string    `json:"zone"`
-	Online    bool      `json:"online"`
-	LastSeen  time.Time `json:"last_seen"`
-	Name      string    `json:"name"`
-	ProfileID string    `json:"profile_id"`
+	MAC          string    `json:"mac"`
+	IP           string    `json:"ip"`
+	Hostname     string    `json:"hostname"`
+	Zone         string    `json:"zone"`
+	Online       bool      `json:"online"`
+	LastSeen     time.Time `json:"last_seen"`
+	Name         string    `json:"name"`
+	ProfileID    string    `json:"profile_id"`
+	Manufacturer string    `json:"manufacturer"`
 }
 
 // Scanner discovers devices on the local network via ARP table and DHCP leases.
@@ -86,7 +87,7 @@ func (s *Scanner) Scan() error {
 	for _, a := range arpEntries {
 		d, ok := s.devices[a.MAC]
 		if !ok {
-			d = &Device{MAC: a.MAC}
+			d = &Device{MAC: a.MAC, Manufacturer: LookupOUI(a.MAC)}
 			s.devices[a.MAC] = d
 		}
 		d.IP = a.IP
@@ -101,16 +102,29 @@ func (s *Scanner) Scan() error {
 	for _, l := range leases {
 		if _, ok := s.devices[l.MAC]; !ok {
 			s.devices[l.MAC] = &Device{
-				MAC:      l.MAC,
-				IP:       l.IP,
-				Hostname: l.Hostname,
-				Online:   false,
-				LastSeen: time.Unix(l.Expiry, 0),
+				MAC:          l.MAC,
+				IP:           l.IP,
+				Hostname:     l.Hostname,
+				Online:       false,
+				LastSeen:     time.Unix(l.Expiry, 0),
+				Manufacturer: LookupOUI(l.MAC),
 			}
 		}
 	}
 
 	return nil
+}
+
+// LookupByIP finds a device by IP and returns its MAC and name.
+func (s *Scanner) LookupByIP(ip string) (mac, name string, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, d := range s.devices {
+		if d.IP == ip {
+			return d.MAC, d.Name, true
+		}
+	}
+	return "", "", false
 }
 
 // SetDeviceName sets the user-assigned name for a device by MAC.

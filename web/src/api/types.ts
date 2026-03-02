@@ -130,6 +130,7 @@ export interface Device {
   last_seen: string
   name: string
   profile_id: string
+  manufacturer: string
 }
 
 export interface IDSAlert {
@@ -166,6 +167,7 @@ export interface ParentalProfile {
 export interface ParentalDevice {
   mac: string
   profile_id: string
+  ip?: string
 }
 
 export interface Schedule {

@@ -9,8 +9,15 @@ import (
 
 // DnsmasqData holds template data for dnsmasq.conf.
 type DnsmasqData struct {
-	Interfaces []DnsmasqInterface
-	LeaseFile  string
+	Interfaces  []DnsmasqInterface
+	StaticHosts []DnsmasqStaticHost
+	LeaseFile   string
+}
+
+// DnsmasqStaticHost pins a MAC address to a static IP for parental controls.
+type DnsmasqStaticHost struct {
+	MAC string
+	IP  string
 }
 
 // DnsmasqInterface represents DHCP config for one interface.
@@ -26,10 +33,23 @@ type DnsmasqInterface struct {
 // RenderDnsmasq renders dnsmasq.conf from the config.
 func (e *Engine) RenderDnsmasq(cfg *config.Config) error {
 	data := DnsmasqData{
-		Interfaces: buildDnsmasqInterfaces(cfg),
-		LeaseFile:  "/var/lib/scout/dnsmasq.leases",
+		Interfaces:  buildDnsmasqInterfaces(cfg),
+		StaticHosts: buildStaticHosts(cfg),
+		LeaseFile:   "/var/lib/scout/dnsmasq.leases",
 	}
 	return e.renderTemplate("dnsmasq.conf.tmpl", e.outputPath("dnsmasq.conf"), data)
+}
+
+// buildStaticHosts creates DHCP reservations from parental device assignments.
+func buildStaticHosts(cfg *config.Config) []DnsmasqStaticHost {
+	var hosts []DnsmasqStaticHost
+	for _, d := range cfg.Parental.Devices {
+		if d.MAC == "" || d.IP == "" {
+			continue
+		}
+		hosts = append(hosts, DnsmasqStaticHost{MAC: d.MAC, IP: d.IP})
+	}
+	return hosts
 }
 
 // buildDnsmasqInterfaces builds the DHCP interface list from static interfaces and VLANs.

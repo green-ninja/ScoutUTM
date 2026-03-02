@@ -27,8 +27,10 @@ import (
 	"github.com/scoututm/scoutd/internal/api"
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/dnslog"
 	"github.com/scoututm/scoutd/internal/ids"
 	"github.com/scoututm/scoutd/internal/netmon"
+	"github.com/scoututm/scoutd/internal/parental"
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/scheduler"
 	"github.com/scoututm/scoutd/internal/service"
@@ -226,8 +228,15 @@ func main() {
 		}
 	}()
 
+	// DNS query logger.
+	dnsLogDir := dnslog.DefaultLogDir
+	dnsLogger := dnslog.NewLogger(dnsLogDir, devMode, scanner)
+	dnsLogDone := make(chan struct{})
+	go dnsLogger.TailFile(filepath.Join(dnsLogDir, dnslog.DefaultLogFile), dnsLogDone)
+
 	// API server.
 	srv := api.NewServer(store, sessions, hub, engine, svcMgr, eveReader, scanner, devMode, version)
+	srv.DNSLogger = dnsLogger
 	router := srv.Router()
 
 	// Register cleanup tasks (after srv is created so we can access RateLimiter).
@@ -238,6 +247,37 @@ func main() {
 			sessions.Cleanup()
 			srv.RateLimiter.Cleanup()
 			return nil
+		},
+	})
+
+	// DNS log rotation (200MB max, 7 days retention).
+	sched.Register(scheduler.Task{
+		Name:     "dns-log-rotate",
+		Interval: 1 * time.Hour,
+		Fn: func(ctx context.Context) error {
+			return dnslog.RotateLog(dnsLogDir, 200*1024*1024, 7)
+		},
+	})
+
+	// Parental schedule enforcement — check every 60s and re-render Unbound if blocked set changes.
+	var prevBlockedIPs []string
+	sched.Register(scheduler.Task{
+		Name:     "parental-schedule-check",
+		Interval: 60 * time.Second,
+		Fn: func(ctx context.Context) error {
+			cfg := store.Current()
+			blocked := parental.BlockedDeviceIPs(cfg, time.Now())
+
+			// Skip if unchanged.
+			if slicesEqual(prevBlockedIPs, blocked) {
+				return nil
+			}
+			prevBlockedIPs = blocked
+
+			if err := engine.RenderUnboundWithSchedule(cfg, blocked); err != nil {
+				return fmt.Errorf("rendering unbound with schedule: %w", err)
+			}
+			return svcMgr.ReloadDaemons([]string{"unbound"})
 		},
 	})
 
@@ -311,6 +351,7 @@ func main() {
 	eveCancel()
 	schedCancel()
 	scanCancel()
+	close(dnsLogDone)
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
@@ -399,6 +440,19 @@ func isFlagSet(name string) bool {
 	return found
 }
 
+// slicesEqual compares two string slices for equality (order-sensitive).
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // devicesEqual compares two device slices for change detection.
 func devicesEqual(a, b []netmon.Device) bool {
 	if len(a) != len(b) {
@@ -413,7 +467,7 @@ func devicesEqual(a, b []netmon.Device) bool {
 		if !ok {
 			return false
 		}
-		if prev.IP != d.IP || prev.Online != d.Online || prev.Hostname != d.Hostname || prev.Name != d.Name || prev.ProfileID != d.ProfileID || prev.Zone != d.Zone {
+		if prev.IP != d.IP || prev.Online != d.Online || prev.Hostname != d.Hostname || prev.Name != d.Name || prev.ProfileID != d.ProfileID || prev.Zone != d.Zone || prev.Manufacturer != d.Manufacturer {
 			return false
 		}
 	}

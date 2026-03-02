@@ -109,7 +109,7 @@ devicesStore.$subscribe(() => {
               <th class="px-4 py-3">Name</th>
               <th class="px-4 py-3">IP</th>
               <th class="px-4 py-3">MAC</th>
-              <th class="px-4 py-3">Hostname</th>
+              <th class="px-4 py-3">Manufacturer</th>
               <th class="px-4 py-3">Profile</th>
               <th class="px-4 py-3"></th>
             </tr>
@@ -130,7 +130,7 @@ devicesStore.$subscribe(() => {
               <td class="px-4 py-3 text-white">{{ d.name || d.hostname || '—' }}</td>
               <td class="px-4 py-3">{{ d.ip }}</td>
               <td class="px-4 py-3 font-mono text-xs">{{ d.mac }}</td>
-              <td class="px-4 py-3">{{ d.hostname || '—' }}</td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{{ d.manufacturer || '—' }}</td>
               <td class="px-4 py-3">
                 <span v-if="d.profile_id" class="px-2 py-0.5 rounded text-xs bg-purple-900 text-purple-300">
                   {{ profileName(d.profile_id) }}

@@ -304,6 +304,86 @@ func TestValidate_ValidVLAN(t *testing.T) {
 	}
 }
 
+func TestValidate_ParentalDuplicateProfileID(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Parental.Profiles = []ParentalProfile{
+		{ID: "p1", Name: "Kids", BlockCategories: []string{}},
+		{ID: "p1", Name: "Teens", BlockCategories: []string{}},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "parental.profiles[1].id") {
+		t.Error("expected error for duplicate profile ID")
+	}
+}
+
+func TestValidate_ParentalDuplicateProfileName(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Parental.Profiles = []ParentalProfile{
+		{ID: "p1", Name: "Kids", BlockCategories: []string{}},
+		{ID: "p2", Name: "kids", BlockCategories: []string{}},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "parental.profiles[1].name") {
+		t.Error("expected error for duplicate profile name (case-insensitive)")
+	}
+}
+
+func TestValidate_ParentalInvalidCategory(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Parental.Profiles = []ParentalProfile{
+		{ID: "p1", Name: "Kids", BlockCategories: []string{"adult", "nonsense"}},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "parental.profiles[0].block_categories[1]") {
+		t.Error("expected error for invalid category")
+	}
+}
+
+func TestValidate_ParentalDeviceBadProfileRef(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Parental.Devices = []ParentalDevice{
+		{MAC: "aa:bb:cc:dd:ee:01", ProfileID: "nonexistent"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "parental.devices[0].profile_id") {
+		t.Error("expected error for device referencing nonexistent profile")
+	}
+}
+
+func TestValidate_ParentalDeviceInvalidIP(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Parental.Profiles = []ParentalProfile{
+		{ID: "p1", Name: "Kids", BlockCategories: []string{}},
+	}
+	cfg.Parental.Devices = []ParentalDevice{
+		{MAC: "aa:bb:cc:dd:ee:01", ProfileID: "p1", IP: "not-an-ip"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "parental.devices[0].ip") {
+		t.Error("expected error for invalid device IP")
+	}
+}
+
+func TestValidate_ParentalTagCollision(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Parental.Profiles = []ParentalProfile{
+		{ID: "p1", Name: "Kids-Only", BlockCategories: []string{}},
+		{ID: "p2", Name: "KidsOnly", BlockCategories: []string{}},
+	}
+	errs := Validate(cfg)
+	// Both names sanitize to "kidsonly", producing a tag collision.
+	found := false
+	for _, e := range errs {
+		if e.Field == "parental.profiles[1].name" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected error for profile names that produce duplicate DNS tags")
+	}
+}
+
 func hasField(errs []ValidationError, field string) bool {
 	for _, e := range errs {
 		if e.Field == field {

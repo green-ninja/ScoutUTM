@@ -127,6 +127,28 @@ function toggleDay(day: string) {
 function categoryLabel(cat: string): string {
   return cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
+
+function isScheduleActive(sched: Schedule): boolean {
+  if (!sched.enabled) return false
+
+  const now = new Date()
+  if (sched.days.length > 0) {
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    const today = dayNames[now.getDay()]
+    if (!sched.days.includes(today)) return false
+  }
+
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  const [sh, sm] = sched.start_time.split(':').map(Number)
+  const [eh, em] = sched.end_time.split(':').map(Number)
+  const startMin = sh * 60 + sm
+  const endMin = eh * 60 + em
+
+  if (startMin <= endMin) {
+    return nowMin >= startMin && nowMin < endMin
+  }
+  return nowMin >= startMin || nowMin < endMin
+}
 </script>
 
 <template>
@@ -164,9 +186,11 @@ function categoryLabel(cat: string): string {
               <span v-if="p.safe_search"> · Safe Search</span>
               <span v-if="p.youtube_restricted"> · YT Restricted</span>
             </p>
-            <p v-if="p.schedule.enabled" class="text-xs text-gray-500 mt-1">
+            <p v-if="p.schedule.enabled" class="text-xs mt-1" :class="isScheduleActive(p.schedule) ? 'text-red-400' : 'text-gray-500'">
               Schedule: {{ p.schedule.start_time }}–{{ p.schedule.end_time }}
-              ({{ p.schedule.days.length }} days)
+              <span v-if="p.schedule.days.length">({{ p.schedule.days.map(d => d.slice(0, 3)).join(', ') }})</span>
+              <span v-else>(every day)</span>
+              · <span class="font-medium">{{ isScheduleActive(p.schedule) ? 'Active (blocking)' : 'Inactive' }}</span>
             </p>
           </div>
         </div>

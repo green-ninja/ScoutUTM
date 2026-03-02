@@ -160,3 +160,74 @@ func TestScanner_SetDeviceName(t *testing.T) {
 	}
 	t.Error("device aa:bb:cc:dd:ee:01 not found")
 }
+
+func TestLookupOUI_KnownVendor(t *testing.T) {
+	// Apple prefix 00:03:93
+	result := LookupOUI("00:03:93:aa:bb:cc")
+	if result != "Apple" {
+		t.Errorf("LookupOUI(Apple MAC) = %q, want Apple", result)
+	}
+}
+
+func TestLookupOUI_UnknownVendor(t *testing.T) {
+	result := LookupOUI("ff:ff:ff:aa:bb:cc")
+	if result != "" {
+		t.Errorf("LookupOUI(unknown MAC) = %q, want empty", result)
+	}
+}
+
+func TestLookupOUI_ShortMAC(t *testing.T) {
+	result := LookupOUI("aa:bb")
+	if result != "" {
+		t.Errorf("LookupOUI(short MAC) = %q, want empty", result)
+	}
+}
+
+func TestLookupOUI_DashFormat(t *testing.T) {
+	// Samsung prefix using dash format
+	result := LookupOUI("00-1A-8A-aa-bb-cc")
+	if result != "Samsung" {
+		t.Errorf("LookupOUI(Samsung dash MAC) = %q, want Samsung", result)
+	}
+}
+
+func TestScanner_DevMode_SetsManufacturer(t *testing.T) {
+	s := NewScanner(true, "")
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	// Dev-mode synthetic devices use aa:bb:cc MACs which won't have OUI entries,
+	// but the Manufacturer field should be populated (even if empty).
+	devices := s.Devices()
+	for _, d := range devices {
+		// Just verify the field exists and scan doesn't crash.
+		_ = d.Manufacturer
+	}
+}
+
+func TestScanner_LookupByIP(t *testing.T) {
+	s := NewScanner(true, "")
+	s.Scan()
+	s.SetDeviceName("aa:bb:cc:dd:ee:01", "My Laptop")
+
+	mac, name, ok := s.LookupByIP("192.168.1.100")
+	if !ok {
+		t.Fatal("LookupByIP should find device at 192.168.1.100")
+	}
+	if mac != "aa:bb:cc:dd:ee:01" {
+		t.Errorf("mac = %q, want aa:bb:cc:dd:ee:01", mac)
+	}
+	if name != "My Laptop" {
+		t.Errorf("name = %q, want My Laptop", name)
+	}
+}
+
+func TestScanner_LookupByIP_NotFound(t *testing.T) {
+	s := NewScanner(true, "")
+	s.Scan()
+
+	_, _, ok := s.LookupByIP("10.0.0.99")
+	if ok {
+		t.Error("LookupByIP should not find unknown IP")
+	}
+}

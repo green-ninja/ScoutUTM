@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/dnslog"
 	"github.com/scoututm/scoutd/internal/ids"
 	"github.com/scoututm/scoutd/internal/netmon"
 	"github.com/scoututm/scoutd/internal/render"
@@ -29,6 +30,7 @@ type Server struct {
 	Services    *service.Manager
 	EVEReader   *ids.Reader
 	Scanner     *netmon.Scanner
+	DNSLogger   *dnslog.Logger
 	DevMode     bool
 	Version     string
 

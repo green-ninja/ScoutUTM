@@ -260,13 +260,22 @@ func (s *Server) handleAssignDevices(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Build MAC→IP lookup from scanner.
+	scannerDevices := s.Scanner.Devices()
+	macToIP := make(map[string]string, len(scannerDevices))
+	for _, d := range scannerDevices {
+		macToIP[strings.ToLower(d.MAC)] = d.IP
+	}
+
 	// Replace device assignments.
 	devices := make([]config.ParentalDevice, 0, len(assignments))
 	for _, a := range assignments {
 		if a.ProfileID != "" {
+			mac := strings.ToLower(a.MAC)
 			devices = append(devices, config.ParentalDevice{
-				MAC:       strings.ToLower(a.MAC),
+				MAC:       mac,
 				ProfileID: a.ProfileID,
+				IP:        macToIP[mac],
 			})
 		}
 	}

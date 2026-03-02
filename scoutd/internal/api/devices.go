@@ -17,25 +17,27 @@ func devicesRoutes(r chi.Router, s *Server) {
 }
 
 type deviceResponse struct {
-	MAC       string `json:"mac"`
-	IP        string `json:"ip"`
-	Hostname  string `json:"hostname"`
-	Zone      string `json:"zone"`
-	Online    bool   `json:"online"`
-	LastSeen  string `json:"last_seen"`
-	Name      string `json:"name"`
-	ProfileID string `json:"profile_id"`
+	MAC          string `json:"mac"`
+	IP           string `json:"ip"`
+	Hostname     string `json:"hostname"`
+	Zone         string `json:"zone"`
+	Online       bool   `json:"online"`
+	LastSeen     string `json:"last_seen"`
+	Name         string `json:"name"`
+	ProfileID    string `json:"profile_id"`
+	Manufacturer string `json:"manufacturer"`
 }
 
 func toDeviceResponse(d netmon.Device, cfg deviceOverlay) deviceResponse {
 	r := deviceResponse{
-		MAC:      d.MAC,
-		IP:       d.IP,
-		Hostname: d.Hostname,
-		Zone:     d.Zone,
-		Online:   d.Online,
-		LastSeen: d.LastSeen.Format("2006-01-02T15:04:05Z"),
-		Name:     d.Name,
+		MAC:          d.MAC,
+		IP:           d.IP,
+		Hostname:     d.Hostname,
+		Zone:         d.Zone,
+		Online:       d.Online,
+		LastSeen:     d.LastSeen.Format("2006-01-02T15:04:05Z"),
+		Name:         d.Name,
+		Manufacturer: d.Manufacturer,
 	}
 	// Overlay config-persisted name and profile.
 	if cfg.Name != "" {
@@ -65,6 +67,16 @@ func (s *Server) buildOverlayMap() map[string]deviceOverlay {
 		overlays[mac] = o
 	}
 	return overlays
+}
+
+// lookupDeviceIP returns the current IP for a device MAC from the scanner.
+func (s *Server) lookupDeviceIP(mac string) string {
+	for _, d := range s.Scanner.Devices() {
+		if strings.ToLower(d.MAC) == mac {
+			return d.IP
+		}
+	}
+	return ""
 }
 
 func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +156,9 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 					cfg.Parental.Devices = append(cfg.Parental.Devices[:i], cfg.Parental.Devices[i+1:]...)
 				} else {
 					cfg.Parental.Devices[i].ProfileID = *req.ProfileID
+					if cfg.Parental.Devices[i].IP == "" {
+						cfg.Parental.Devices[i].IP = s.lookupDeviceIP(mac)
+					}
 				}
 				found = true
 				break
@@ -153,6 +168,7 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 			cfg.Parental.Devices = append(cfg.Parental.Devices, config.ParentalDevice{
 				MAC:       mac,
 				ProfileID: *req.ProfileID,
+				IP:        s.lookupDeviceIP(mac),
 			})
 		}
 

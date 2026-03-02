@@ -156,6 +156,7 @@ type Schedule struct {
 type ParentalDevice struct {
 	MAC       string `json:"mac"`
 	ProfileID string `json:"profile_id"`
+	IP        string `json:"ip,omitempty"`
 }
 
 type UpdateConfig struct {
