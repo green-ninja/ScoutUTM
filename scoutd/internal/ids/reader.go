@@ -1,0 +1,211 @@
+package ids
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"log"
+	"net"
+	"os"
+	"sync"
+	"time"
+)
+
+// Alert represents a Suricata EVE alert event.
+type Alert struct {
+	Timestamp time.Time   `json:"timestamp"`
+	SrcIP     string      `json:"src_ip"`
+	SrcPort   int         `json:"src_port"`
+	DestIP    string      `json:"dest_ip"`
+	DestPort  int         `json:"dest_port"`
+	Proto     string      `json:"proto"`
+	EventType string      `json:"event_type"`
+	Alert     AlertDetail `json:"alert"`
+}
+
+// AlertDetail holds the nested alert fields from Suricata EVE.
+type AlertDetail struct {
+	Action      string `json:"action"`
+	GID         int    `json:"gid"`
+	SignatureID int    `json:"signature_id"`
+	Rev         int    `json:"rev"`
+	Signature   string `json:"signature"`
+	Category    string `json:"category"`
+	Severity    int    `json:"severity"`
+}
+
+// eveEvent is the raw JSON structure from Suricata EVE log.
+type eveEvent struct {
+	Timestamp string      `json:"timestamp"`
+	SrcIP     string      `json:"src_ip"`
+	SrcPort   int         `json:"src_port"`
+	DestIP    string      `json:"dest_ip"`
+	DestPort  int         `json:"dest_port"`
+	Proto     string      `json:"proto"`
+	EventType string      `json:"event_type"`
+	Alert     AlertDetail `json:"alert"`
+}
+
+const ringCapacity = 100
+
+// RingBuffer is a fixed-size circular buffer for alerts.
+type RingBuffer struct {
+	mu    sync.RWMutex
+	items []Alert
+	pos   int
+	full  bool
+}
+
+// NewRingBuffer creates a ring buffer with fixed capacity.
+func NewRingBuffer() *RingBuffer {
+	return &RingBuffer{
+		items: make([]Alert, ringCapacity),
+	}
+}
+
+// Add appends an alert to the ring buffer, overwriting the oldest if full.
+func (rb *RingBuffer) Add(a Alert) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	rb.items[rb.pos] = a
+	rb.pos = (rb.pos + 1) % ringCapacity
+	if rb.pos == 0 || rb.full {
+		rb.full = true
+	}
+}
+
+// All returns all alerts in chronological order (oldest first).
+func (rb *RingBuffer) All() []Alert {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	if !rb.full {
+		result := make([]Alert, rb.pos)
+		copy(result, rb.items[:rb.pos])
+		return result
+	}
+	result := make([]Alert, ringCapacity)
+	copy(result, rb.items[rb.pos:])
+	copy(result[ringCapacity-rb.pos:], rb.items[:rb.pos])
+	return result
+}
+
+// Reader reads Suricata EVE alerts from a Unix datagram socket.
+type Reader struct {
+	socketPath string
+	logPath    string
+	alerts     *RingBuffer
+	devMode    bool
+}
+
+// NewReader creates an EVE alert reader.
+func NewReader(socketPath, logPath string, devMode bool) *Reader {
+	return &Reader{
+		socketPath: socketPath,
+		logPath:    logPath,
+		alerts:     NewRingBuffer(),
+		devMode:    devMode,
+	}
+}
+
+// Alerts returns the ring buffer for API access.
+func (r *Reader) Alerts() *RingBuffer {
+	return r.alerts
+}
+
+// Run starts reading EVE alerts. In dev-mode, blocks until context is cancelled.
+// In production, listens on a Unix datagram socket for Suricata EVE output.
+func (r *Reader) Run(ctx context.Context) {
+	if r.devMode {
+		<-ctx.Done()
+		return
+	}
+
+	for {
+		if err := r.listen(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("EVE reader error: %v, retrying in 5s", err)
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// listen opens the Unix datagram socket and reads events.
+func (r *Reader) listen(ctx context.Context) error {
+	// Remove stale socket file.
+	os.Remove(r.socketPath)
+
+	addr, err := net.ResolveUnixAddr("unixgram", r.socketPath)
+	if err != nil {
+		return err
+	}
+
+	conn, err := net.ListenUnixgram("unixgram", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// Close socket when context is cancelled.
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+	}()
+
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	for scanner.Scan() {
+		r.processLine(scanner.Bytes())
+	}
+	return scanner.Err()
+}
+
+// processLine parses a single EVE JSON line and adds alerts to the ring buffer.
+func (r *Reader) processLine(line []byte) {
+	var ev eveEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return
+	}
+	if ev.EventType != "alert" {
+		return
+	}
+
+	ts, err := time.Parse("2006-01-02T15:04:05.999999-0700", ev.Timestamp)
+	if err != nil {
+		ts = time.Now()
+	}
+
+	alert := Alert{
+		Timestamp: ts,
+		SrcIP:     ev.SrcIP,
+		SrcPort:   ev.SrcPort,
+		DestIP:    ev.DestIP,
+		DestPort:  ev.DestPort,
+		Proto:     ev.Proto,
+		EventType: ev.EventType,
+		Alert:     ev.Alert,
+	}
+
+	r.alerts.Add(alert)
+
+	// Append to persistent log file.
+	if r.logPath != "" {
+		r.appendLog(line)
+	}
+}
+
+// appendLog appends raw JSON to the persistent EVE log file.
+func (r *Reader) appendLog(line []byte) {
+	f, err := os.OpenFile(r.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(line)
+	f.Write([]byte("\n"))
+}

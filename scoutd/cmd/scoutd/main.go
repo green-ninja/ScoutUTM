@@ -24,7 +24,9 @@ import (
 	"github.com/scoututm/scoutd/internal/api"
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/ids"
 	"github.com/scoututm/scoutd/internal/render"
+	"github.com/scoututm/scoutd/internal/scheduler"
 	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
 )
@@ -121,8 +123,32 @@ func main() {
 	// Service manager.
 	svcMgr := service.NewManager(devMode)
 
+	// EVE alert reader.
+	eveReader := ids.NewReader(
+		"/var/run/suricata/eve.sock",
+		"/var/lib/scout/suricata/eve.json",
+		devMode,
+	)
+	eveCtx, eveCancel := context.WithCancel(context.Background())
+	go eveReader.Run(eveCtx)
+
+	// Scheduler.
+	sched := scheduler.New(devMode)
+	sched.Register(scheduler.Task{
+		Name:  "suricata-update",
+		RunAt: "03:00",
+		Fn: func(ctx context.Context) error {
+			if err := svcMgr.RunCommand("suricata-update"); err != nil {
+				return err
+			}
+			return svcMgr.ReloadDaemons([]string{"suricata"})
+		},
+	})
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	go sched.Start(schedCtx)
+
 	// API server.
-	srv := api.NewServer(store, sessions, hub, engine, svcMgr, devMode, version)
+	srv := api.NewServer(store, sessions, hub, engine, svcMgr, eveReader, devMode, version)
 	router := srv.Router()
 
 	// TLS.
@@ -178,11 +204,14 @@ func main() {
 	sig := <-quit
 	log.Printf("received %v, shutting down", sig)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	eveCancel()
+	schedCancel()
 
-	httpServer.Shutdown(ctx)
-	httpsServer.Shutdown(ctx)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	httpServer.Shutdown(shutdownCtx)
+	httpsServer.Shutdown(shutdownCtx)
 	log.Println("scoutd stopped")
 }
 

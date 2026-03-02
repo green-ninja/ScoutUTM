@@ -29,7 +29,7 @@ func TestRenderAll(t *testing.T) {
 	}
 
 	// Verify output files exist.
-	for _, name := range []string{"nftables.conf", "dnsmasq.conf", "chrony/chrony.conf", "unbound/unbound.conf", "wireguard.conf"} {
+	for _, name := range []string{"nftables.conf", "dnsmasq.conf", "chrony/chrony.conf", "unbound/unbound.conf", "wireguard.conf", "suricata/suricata.yaml"} {
 		path := filepath.Join(e.outputDir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected output file %s to exist", name)
@@ -62,8 +62,8 @@ func TestRenderDaemons_UnknownSkipped(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()
 
-	// "suricata" has no renderer yet — should be skipped without error.
-	if err := e.RenderDaemons(cfg, []string{"suricata"}); err != nil {
+	// "fakeDaemon" has no renderer — should be skipped without error.
+	if err := e.RenderDaemons(cfg, []string{"fakeDaemon"}); err != nil {
 		t.Fatalf("RenderDaemons with unknown: %v", err)
 	}
 }

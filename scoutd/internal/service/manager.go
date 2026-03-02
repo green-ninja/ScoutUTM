@@ -56,6 +56,15 @@ func (m *Manager) ReloadDaemons(daemons []string) error {
 	return nil
 }
 
+// RunCommand executes a system command. In dev-mode, it only logs.
+func (m *Manager) RunCommand(name string, args ...string) error {
+	if m.devMode {
+		log.Printf("[dev-mode] would run command: %s %v", name, args)
+		return nil
+	}
+	return runCmd(name, args...)
+}
+
 // HealthCheck verifies that reloaded daemons are running correctly.
 // In dev-mode, always passes. In production, checks each daemon's status.
 func (m *Manager) HealthCheck(daemons []string) error {

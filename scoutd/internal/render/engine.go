@@ -38,6 +38,7 @@ func (e *Engine) renderers() map[string]DaemonRenderer {
 		"chrony":    e.RenderChrony,
 		"unbound":   e.RenderUnbound,
 		"wireguard": e.RenderWireGuard,
+		"suricata":  e.RenderSuricata,
 	}
 }
 
@@ -66,7 +67,7 @@ func (e *Engine) RenderDaemons(cfg *config.Config, daemons []string) error {
 	for _, name := range daemons {
 		render, ok := renderers[name]
 		if !ok {
-			continue // Skip daemons without templates (e.g., suricata, wireguard stubs).
+			continue // Skip daemons without registered renderers.
 		}
 		if err := render(cfg); err != nil {
 			return fmt.Errorf("rendering %s: %w", name, err)

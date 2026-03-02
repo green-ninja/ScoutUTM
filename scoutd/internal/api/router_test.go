@@ -10,6 +10,7 @@ import (
 
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/ids"
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
@@ -28,7 +29,8 @@ func testServer(t *testing.T) (*Server, func()) {
 	outputDir := filepath.Join(dir, "output")
 	engine := render.NewEngine(tmplDir, outputDir, true)
 	svcMgr := service.NewManager(true)
-	srv := NewServer(store, sessions, hub, engine, svcMgr, true, "0.1.0-test")
+	eveReader := ids.NewReader("", "", true)
+	srv := NewServer(store, sessions, hub, engine, svcMgr, eveReader, true, "0.1.0-test")
 	return srv, func() {}
 }
 

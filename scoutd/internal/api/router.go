@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/scoututm/scoutd/internal/auth"
 	"github.com/scoututm/scoutd/internal/config"
+	"github.com/scoututm/scoutd/internal/ids"
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
@@ -23,6 +24,7 @@ type Server struct {
 	Hub         *ws.Hub
 	Render      *render.Engine
 	Services    *service.Manager
+	EVEReader   *ids.Reader
 	DevMode     bool
 	Version     string
 
@@ -30,7 +32,7 @@ type Server struct {
 }
 
 // NewServer creates an API server.
-func NewServer(cfg *config.Store, sessions *auth.SessionManager, hub *ws.Hub, renderer *render.Engine, svcMgr *service.Manager, devMode bool, version string) *Server {
+func NewServer(cfg *config.Store, sessions *auth.SessionManager, hub *ws.Hub, renderer *render.Engine, svcMgr *service.Manager, eveReader *ids.Reader, devMode bool, version string) *Server {
 	return &Server{
 		Config:      cfg,
 		Sessions:    sessions,
@@ -38,6 +40,7 @@ func NewServer(cfg *config.Store, sessions *auth.SessionManager, hub *ws.Hub, re
 		Hub:         hub,
 		Render:      renderer,
 		Services:    svcMgr,
+		EVEReader:   eveReader,
 		DevMode:     devMode,
 		Version:     version,
 		startTime:   time.Now(),
