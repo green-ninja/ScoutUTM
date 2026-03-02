@@ -114,6 +114,30 @@ func TestRenderSuricata_Suppressed(t *testing.T) {
 	}
 }
 
+func TestRenderSuricata_SuppressedRemoved_CleansThresholdFile(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+
+	// First render with suppressed SIDs.
+	cfg.IDS.Suppressed = []int{2001}
+	if err := e.RenderSuricata(cfg); err != nil {
+		t.Fatalf("RenderSuricata with suppressed: %v", err)
+	}
+	threshPath := filepath.Join(e.outputDir, "suricata", "threshold.config")
+	if _, err := os.Stat(threshPath); os.IsNotExist(err) {
+		t.Fatal("threshold.config should exist after rendering with suppressed SIDs")
+	}
+
+	// Re-render with empty suppressed list.
+	cfg.IDS.Suppressed = []int{}
+	if err := e.RenderSuricata(cfg); err != nil {
+		t.Fatalf("RenderSuricata without suppressed: %v", err)
+	}
+	if _, err := os.Stat(threshPath); !os.IsNotExist(err) {
+		t.Error("threshold.config should be removed when suppressed list is empty")
+	}
+}
+
 func TestRuleFilesForRulesets(t *testing.T) {
 	tests := []struct {
 		name     string

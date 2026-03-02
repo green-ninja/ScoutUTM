@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/scoututm/scoutd/internal/config"
@@ -37,10 +38,12 @@ func (e *Engine) RenderSuricata(cfg *config.Config) error {
 		return err
 	}
 
-	// Render threshold.config for suppressed SIDs.
+	// Render threshold.config for suppressed SIDs, or remove stale file.
+	thresholdPath := e.outputPath("suricata/threshold.config")
 	if len(cfg.IDS.Suppressed) > 0 {
-		return e.renderTemplate("threshold.config.tmpl", e.outputPath("suricata/threshold.config"), data)
+		return e.renderTemplate("threshold.config.tmpl", thresholdPath, data)
 	}
+	os.Remove(thresholdPath)
 
 	return nil
 }

@@ -95,6 +95,9 @@ type Reader struct {
 	logPath    string
 	alerts     *RingBuffer
 	devMode    bool
+
+	logMu   sync.Mutex
+	logFile *os.File
 }
 
 // NewReader creates an EVE alert reader.
@@ -118,6 +121,11 @@ func (r *Reader) Run(ctx context.Context) {
 	if r.devMode {
 		<-ctx.Done()
 		return
+	}
+
+	if r.logPath != "" {
+		r.openLog()
+		defer r.closeLog()
 	}
 
 	for {
@@ -152,9 +160,14 @@ func (r *Reader) listen(ctx context.Context) error {
 	defer conn.Close()
 
 	// Close socket when context is cancelled.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		conn.Close()
+		select {
+		case <-ctx.Done():
+			conn.Close()
+		case <-done:
+		}
 	}()
 
 	scanner := bufio.NewScanner(conn)
@@ -177,7 +190,11 @@ func (r *Reader) processLine(line []byte) {
 
 	ts, err := time.Parse("2006-01-02T15:04:05.999999-0700", ev.Timestamp)
 	if err != nil {
-		ts = time.Now()
+		// Suricata 7+ may use colon in timezone offset.
+		ts, err = time.Parse("2006-01-02T15:04:05.999999-07:00", ev.Timestamp)
+		if err != nil {
+			ts = time.Now()
+		}
 	}
 
 	alert := Alert{
@@ -199,13 +216,35 @@ func (r *Reader) processLine(line []byte) {
 	}
 }
 
-// appendLog appends raw JSON to the persistent EVE log file.
-func (r *Reader) appendLog(line []byte) {
+// openLog opens the persistent EVE log file for appending.
+func (r *Reader) openLog() {
 	f, err := os.OpenFile(r.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		log.Printf("EVE log open error: %v", err)
 		return
 	}
-	defer f.Close()
-	f.Write(line)
-	f.Write([]byte("\n"))
+	r.logMu.Lock()
+	r.logFile = f
+	r.logMu.Unlock()
+}
+
+// closeLog closes the persistent EVE log file.
+func (r *Reader) closeLog() {
+	r.logMu.Lock()
+	defer r.logMu.Unlock()
+	if r.logFile != nil {
+		r.logFile.Close()
+		r.logFile = nil
+	}
+}
+
+// appendLog appends raw JSON to the persistent EVE log file.
+func (r *Reader) appendLog(line []byte) {
+	r.logMu.Lock()
+	defer r.logMu.Unlock()
+	if r.logFile == nil {
+		return
+	}
+	r.logFile.Write(line)
+	r.logFile.Write([]byte("\n"))
 }

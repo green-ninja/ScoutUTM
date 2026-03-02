@@ -62,20 +62,31 @@ func TestComputeNextRun_RunAt_Tomorrow(t *testing.T) {
 	}
 }
 
+func TestComputeNextRun_RunAt_Invalid(t *testing.T) {
+	now := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	task := Task{Name: "test", RunAt: "bad"}
+
+	next := computeNextRun(task, now)
+	want := now.Add(24 * time.Hour)
+	if !next.Equal(want) {
+		t.Errorf("computeNextRun invalid RunAt = %v, want %v (24h fallback)", next, want)
+	}
+}
+
 func TestParseHHMM(t *testing.T) {
 	var h, m int
 
-	ok, _ := parseHHMM("03:00", &h, &m)
+	ok := parseHHMM("03:00", &h, &m)
 	if !ok || h != 3 || m != 0 {
 		t.Errorf("parseHHMM(03:00) = %v, %d:%d", ok, h, m)
 	}
 
-	ok, _ = parseHHMM("23:59", &h, &m)
+	ok = parseHHMM("23:59", &h, &m)
 	if !ok || h != 23 || m != 59 {
 		t.Errorf("parseHHMM(23:59) = %v, %d:%d", ok, h, m)
 	}
 
-	ok, _ = parseHHMM("bad", &h, &m)
+	ok = parseHHMM("bad", &h, &m)
 	if ok {
 		t.Error("parseHHMM(bad) should return false")
 	}

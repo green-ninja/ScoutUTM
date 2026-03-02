@@ -83,7 +83,7 @@ func computeNextRun(t Task, after time.Time) time.Time {
 // nextRunAt computes the next occurrence of "HH:MM" after the given time.
 func nextRunAt(runAt string, after time.Time) time.Time {
 	var hour, min int
-	if _, err := parseHHMM(runAt, &hour, &min); err != nil {
+	if !parseHHMM(runAt, &hour, &min) {
 		return after.Add(24 * time.Hour)
 	}
 
@@ -96,16 +96,16 @@ func nextRunAt(runAt string, after time.Time) time.Time {
 }
 
 // parseHHMM parses "HH:MM" into hour and minute.
-func parseHHMM(s string, hour, min *int) (bool, error) {
+func parseHHMM(s string, hour, min *int) bool {
 	if len(s) != 5 || s[2] != ':' {
-		return false, nil
+		return false
 	}
 	h := int(s[0]-'0')*10 + int(s[1]-'0')
 	m := int(s[3]-'0')*10 + int(s[4]-'0')
 	if h < 0 || h > 23 || m < 0 || m > 59 {
-		return false, nil
+		return false
 	}
 	*hour = h
 	*min = m
-	return true, nil
+	return true
 }

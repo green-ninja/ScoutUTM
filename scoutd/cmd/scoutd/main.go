@@ -133,6 +133,7 @@ func main() {
 	go eveReader.Run(eveCtx)
 
 	// Scheduler.
+	eveLogPath := "/var/lib/scout/suricata/eve.json"
 	sched := scheduler.New(devMode)
 	sched.Register(scheduler.Task{
 		Name:  "suricata-update",
@@ -142,6 +143,13 @@ func main() {
 				return err
 			}
 			return svcMgr.ReloadDaemons([]string{"suricata"})
+		},
+	})
+	sched.Register(scheduler.Task{
+		Name:     "eve-log-rotate",
+		Interval: 1 * time.Hour,
+		Fn: func(ctx context.Context) error {
+			return ids.RotateEVELog(eveLogPath, 50*1024*1024, 7)
 		},
 	})
 	schedCtx, schedCancel := context.WithCancel(context.Background())
