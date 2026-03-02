@@ -18,8 +18,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+
+	"encoding/json"
 
 	"github.com/scoututm/scoutd/internal/api"
 	"github.com/scoututm/scoutd/internal/auth"
@@ -28,6 +31,7 @@ import (
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/scheduler"
 	"github.com/scoututm/scoutd/internal/service"
+	"github.com/scoututm/scoutd/internal/stats"
 	"github.com/scoututm/scoutd/internal/ws"
 )
 
@@ -112,7 +116,37 @@ func main() {
 
 	// WebSocket hub.
 	hub := ws.NewHub()
-	go hub.Run()
+
+	// Stats collector + broadcast goroutine.
+	wanIface := wanInterfaceName(store.Current())
+	collector := stats.NewCollector(devMode, wanIface)
+	statsCtx, statsCancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(hub.StatsInterval())
+		defer ticker.Stop()
+		for {
+			select {
+			case <-statsCtx.Done():
+				return
+			case <-ticker.C:
+				if hub.ClientCount() == 0 {
+					continue
+				}
+				snap, err := collector.Collect()
+				if err != nil {
+					log.Printf("stats collect: %v", err)
+					continue
+				}
+				msg, _ := json.Marshal(map[string]interface{}{
+					"type": "stats",
+					"data": snap,
+				})
+				hub.Broadcast(msg)
+				// Adjust tick rate if client count changed.
+				ticker.Reset(hub.StatsInterval())
+			}
+		}
+	}()
 
 	// Template rendering engine.
 	engine := render.NewEngine(templateDir, outputDir, devMode)
@@ -159,6 +193,17 @@ func main() {
 	srv := api.NewServer(store, sessions, hub, engine, svcMgr, eveReader, devMode, version)
 	router := srv.Router()
 
+	// Register cleanup tasks (after srv is created so we can access RateLimiter).
+	sched.Register(scheduler.Task{
+		Name:     "session-cleanup",
+		Interval: 1 * time.Hour,
+		Fn: func(ctx context.Context) error {
+			sessions.Cleanup()
+			srv.RateLimiter.Cleanup()
+			return nil
+		},
+	})
+
 	// TLS.
 	if err := ensureTLSCert(tlsDir); err != nil {
 		log.Fatalf("TLS setup: %v", err)
@@ -178,18 +223,31 @@ func main() {
 	}
 
 	httpsServer := &http.Server{
-		Addr:      addr,
-		Handler:   router,
-		TLSConfig: tlsConfig,
+		Addr:              addr,
+		Handler:           router,
+		TLSConfig:         tlsConfig,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// HTTP → HTTPS redirect.
+	httpsPort := addr // e.g. ":443" or ":8443"
 	httpServer := &http.Server{
 		Addr: httpAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			target := "https://" + r.Host + r.URL.RequestURI()
+			host := r.Host
+			// Strip port from Host header, replace with HTTPS port.
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			if httpsPort != ":443" {
+				host = net.JoinHostPort(host, strings.TrimPrefix(httpsPort, ":"))
+			}
+			target := "https://" + host + r.URL.RequestURI()
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 		}),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 
 	go func() {
@@ -212,6 +270,7 @@ func main() {
 	sig := <-quit
 	log.Printf("received %v, shutting down", sig)
 
+	statsCancel()
 	eveCancel()
 	schedCancel()
 
@@ -278,6 +337,18 @@ func ensureTLSCert(dir string) error {
 
 	log.Printf("generated self-signed TLS cert in %s", dir)
 	return nil
+}
+
+func wanInterfaceName(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone == "wan" {
+			return iface.Name
+		}
+	}
+	return ""
 }
 
 func isFlagSet(name string) bool {

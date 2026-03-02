@@ -89,8 +89,8 @@ The trade-off: OpenWrt provides built-in wireless driver support and a battle-te
 |  |  +------------+  +-----------+  +----------+  +--------------+  |     |
 |  |  | Template   |  | Auth      |  | Update   |  | Stats        |  |     |
 |  |  | Engine     |  | Module    |  | Client   |  | Collector    |  |     |
-|  |  | (text/tmpl)|  | (sessions)|  | (RAUC)   |  | (netlink,    |  |     |
-|  |  |            |  |           |  |          |  |  /proc)      |  |     |
+|  |  | (text/tmpl)|  | (sessions)|  | (RAUC)   |  | (/proc,      |  |     |
+|  |  |            |  |           |  |          |  |  unbound)    |  |     |
 |  |  +------------+  +-----------+  +----------+  +--------------+  |     |
 |  +------------------------------------------------------------------+     |
 |         |                 |                |                |              |
@@ -211,7 +211,7 @@ scoutd is the single management process. It is NOT the data plane. Packets flow 
 - **No cgo.** `CGO_ENABLED=0` for a fully static binary that runs on Alpine/musl without issues.
 - **Embedded frontend.** Vue.js static assets compiled into the binary via `//go:embed`.
 - **Template safety.** All daemon config templates are executed against **strongly typed Go structs** (`config.Firewall`, `config.DNS`, etc.), never against raw user input strings or `map[string]interface{}`. User-provided values (zone names, IP addresses, hostnames) are validated by the config schema before they ever reach a template. This prevents template injection -- a user cannot craft an input that escapes the template context and injects arbitrary nftables/Suricata configuration.
-- **Dev mode.** `scoutd --dev-mode` starts the HTTP server and config management but stubs out hardware-dependent operations (nftables apply, OpenRC service orchestration, netlink stats). Templates are still rendered and written to disk for inspection, but not applied. This enables Tier 1 host-native development on any OS without root or Linux-specific features.
+- **Dev mode.** `scoutd --dev-mode` starts the HTTP server and config management but stubs out hardware-dependent operations (nftables apply, OpenRC service orchestration, /proc stats). Templates are still rendered and written to disk for inspection, but not applied. This enables Tier 1 host-native development on any OS without root or Linux-specific features.
 
 ### 3.3 Internal Structure
 
@@ -252,9 +252,10 @@ scoutd/
 │   │   └── openrc.go               # OpenRC rc-service integration
 │   ├── stats/                      # Real-time statistics
 │   │   ├── collector.go            # Aggregator goroutine
-│   │   ├── netlink.go              # Interface stats via netlink
+│   │   ├── procnet.go              # Interface stats via /proc/net/dev
 │   │   ├── conntrack.go            # Connection tracking
-│   │   └── system.go               # CPU, memory, uptime, temperature
+│   │   ├── dns.go                  # DNS query/block stats via unbound-control
+│   │   └── system.go               # CPU, memory, uptime
 │   ├── update/                     # OTA update client
 │   │   ├── checker.go              # Periodic version check
 │   │   └── rauc.go                 # RAUC CLI integration
@@ -954,8 +955,8 @@ JSON messages over WSS. Client subscribes to topics. Server pushes:
 - Vue Router (client-side routing)
 - Pinia (state management)
 - Tailwind CSS (utility-first, purged for small output)
-- uPlot or Chart.js (lightweight charts)
-- qrcode.vue (WireGuard peer QR codes)
+- uPlot (lightweight charts)
+- Server-side QR generation (WireGuard peer QR codes — private key never in browser)
 
 **No heavy UI framework** (no Vuetify, no Element Plus). Target bundle: <500KB gzipped.
 
@@ -1386,7 +1387,7 @@ ScoutUTM/
 │   │   ├── config/                # Config store + schema + validation
 │   │   ├── render/                # Template engine for daemon configs
 │   │   ├── service/               # Service lifecycle (OpenRC)
-│   │   ├── stats/                 # Real-time stats (netlink, conntrack)
+│   │   ├── stats/                 # Real-time stats (/proc, conntrack, DNS)
 │   │   ├── update/                # OTA client (RAUC)
 │   │   ├── auth/                  # Session auth + bcrypt
 │   │   └── netmon/                # ARP, DHCP, device fingerprinting

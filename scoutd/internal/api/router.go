@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/service"
 	"github.com/scoututm/scoutd/internal/ws"
+	scoutweb "github.com/scoututm/scoutd/web"
 )
 
 // Server holds dependencies for all API handlers.
@@ -51,9 +53,10 @@ func NewServer(cfg *config.Store, sessions *auth.SessionManager, hub *ws.Hub, re
 func (s *Server) Router() chi.Router {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RealIP)
+	r.Use(redactTokenParam)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(checkOrigin)
 	r.Use(maxBodySize(1 << 20)) // 1MB request body limit
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -66,6 +69,7 @@ func (s *Server) Router() chi.Router {
 			r.Use(s.authMiddleware)
 
 			r.Post("/auth/logout", s.handleLogout)
+			r.Get("/ws", s.handleWebSocket)
 
 			firewallRoutes(r, s)
 			dnsRoutes(r, s)
@@ -79,7 +83,35 @@ func (s *Server) Router() chi.Router {
 		})
 	})
 
+	// SPA file server: serve embedded frontend, fallback to index.html.
+	if dist, err := fs.Sub(scoutweb.FS, "dist"); err == nil {
+		if _, err := dist.Open("index.html"); err == nil {
+			r.NotFound(spaHandler(dist))
+		}
+	}
+
 	return r
+}
+
+// spaHandler serves static files from the embedded FS, falling back to
+// index.html for paths that don't match a file (SPA client-side routing).
+func spaHandler(fsys fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(fsys))
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Try to open the requested file.
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		if f, err := fsys.Open(path); err == nil {
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// File not found — serve index.html for SPA routing.
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	}
 }
 
 // handleHealth returns system health status (unauthenticated).
@@ -195,6 +227,10 @@ func extractToken(r *http.Request) string {
 	if c, err := r.Cookie("scout_session"); err == nil {
 		return c.Value
 	}
+	// Fall back to query param (for WebSocket upgrade).
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
 	return ""
 }
 
@@ -212,4 +248,45 @@ func maxBodySize(n int64) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// redactTokenParam removes the token query parameter from the URL before
+// it reaches the logger middleware, preventing session tokens from appearing
+// in access logs.
+func redactTokenParam(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" && r.URL.Query().Get("token") != "" {
+			q := r.URL.Query()
+			q.Set("token", "REDACTED")
+			r.URL.RawQuery = q.Encode()
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkOrigin rejects cross-origin state-changing requests as CSRF
+// defense-in-depth (supplements SameSite=Strict cookies).
+func checkOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only check state-changing methods.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// No Origin header (e.g. curl, non-browser clients) — allow.
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Origin must match the Host header (same-origin).
+		// Origin is scheme://host[:port], Host is host[:port].
+		expected1 := "https://" + r.Host
+		expected2 := "http://" + r.Host
+		if origin != expected1 && origin != expected2 {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request blocked"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

@@ -120,6 +120,18 @@ func (l *LoginRateLimiter) ResetIP(ip string) {
 	delete(l.perIP, ip)
 }
 
+// Cleanup removes expired entries from the perIP map.
+func (l *LoginRateLimiter) Cleanup() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	for ip, a := range l.perIP {
+		if now.After(a.resetAt) {
+			delete(l.perIP, ip)
+		}
+	}
+}
+
 // NewSessionManager creates a SessionManager with the default 24h TTL.
 func NewSessionManager() *SessionManager {
 	return &SessionManager{

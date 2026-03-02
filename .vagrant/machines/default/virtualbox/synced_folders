@@ -1,1 +1,0 @@
-{"virtualbox":{"/opt/scout-build":{"guestpath":"/opt/scout-build","hostpath":"C:/Users/Dino/Development/ScoutUTM/build","disabled":false,"__vagrantfile":true},"/opt/scout-tests":{"guestpath":"/opt/scout-tests","hostpath":"C:/Users/Dino/Development/ScoutUTM/tests","disabled":false,"__vagrantfile":true}}}
