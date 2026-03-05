@@ -7,9 +7,24 @@ echo "=== ScoutUTM Dev VM Provisioning ==="
 # Flush any nftables rules immediately.
 nft flush ruleset 2>/dev/null || true
 
+# Enable IP forwarding so the kernel routes packets between LAN (eth1) and WAN (eth0).
+sysctl -w net.ipv4.ip_forward=1
+mkdir -p /etc/sysctl.d
+echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-scout-forward.conf
+
+# Fix DNS — VirtualBox NAT DNS proxy can be unreliable.
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
+# Switch to official Alpine CDN (the box ships with kernel.org mirrors which are less reliable).
+ALPINE_VER=$(cat /etc/alpine-release | cut -d. -f1,2)
+cat > /etc/apk/repositories << EOF
+https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main
+https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community
+EOF
+
 # Install ScoutOS packages.
 apk update
-apk add --no-cache \
+apk add \
   nftables \
   suricata \
   unbound \
@@ -25,6 +40,7 @@ apk add --no-cache \
 # Create directories.
 mkdir -p /etc/scout/tls
 mkdir -p /var/lib/scout
+mkdir -p /var/lib/scout/logs
 mkdir -p /var/log/scout
 mkdir -p /usr/share/scoutd/templates
 
@@ -126,7 +142,10 @@ rc-service nftables start 2>/dev/null || true
 # Create DNSSEC root key.
 mkdir -p /var/lib/unbound
 unbound-anchor -a /var/lib/unbound/root.key 2>/dev/null || true
-chown unbound:unbound /var/lib/unbound/root.key 2>/dev/null || true
+chown -R unbound:unbound /var/lib/unbound
+chown unbound:unbound /var/lib/scout/logs 2>/dev/null || true
+touch /var/lib/scout/logs/dns-query.log
+chown unbound:unbound /var/lib/scout/logs/dns-query.log 2>/dev/null || true
 # Create stub RPZ blocklist zone files (real lists are fetched by scheduler in production).
 mkdir -p /var/lib/scout/blocklists
 for zone in rpz-malware rpz-phishing rpz-ads; do
@@ -139,7 +158,7 @@ done
 # Start other daemons.
 rc-service chronyd start 2>/dev/null || true
 rc-service dnsmasq start 2>/dev/null || true
-rc-service unbound start 2>/dev/null || true
+rc-service unbound start || echo "WARNING: unbound failed to start"
 
 # Reload scout nftables rules — rc-service nftables start may have loaded Alpine defaults.
 nft -f /etc/nftables.conf 2>/dev/null || echo "WARNING: nft reload failed"
@@ -150,6 +169,7 @@ echo "=== Provisioning complete ==="
 echo ""
 echo "Checking services..."
 echo "  scoutd:  $(rc-service scoutd status 2>/dev/null || echo 'not running')"
+echo "  unbound: $(rc-service unbound status 2>/dev/null || echo 'not running')"
 echo "  chronyd: $(rc-service chronyd status 2>/dev/null || echo 'not running')"
 echo ""
 echo "Checking ports..."
@@ -159,9 +179,15 @@ echo "Web UI: https://localhost:8443 (from host)"
 echo "Login:  admin / admin"
 
 # ── Integration Tests ──
+if [ "$SCOUT_NO_TESTS" = "1" ]; then
+  echo ""
+  echo "Skipping integration tests (SCOUT_NO_TESTS=1)"
+  exit 0
+fi
+
 # Disable set -e so test failures don't abort provisioning.
 set +e
-# Run all non-empty test scripts and report results.
+
 TEST_DIR="/opt/scout-tests"
 if [ -d "$TEST_DIR" ] && ls "$TEST_DIR"/*_test.sh >/dev/null 2>&1; then
   echo ""

@@ -1,71 +1,36 @@
 package stats
 
 import (
-	"math/rand"
 	"time"
 )
 
 // Collector gathers system statistics.
 type Collector struct {
-	devMode   bool
-	wanIface  string
-	startTime time.Time
-	prevCPU   cpuTimes
-	prevNet   netCounters
-	prevTime  time.Time
-
-	// Dev-mode synthetic DNS counters (accumulated).
-	devDNSQueries uint64
-	devDNSBlocked uint64
+	wanIface string
+	prevCPU  cpuTimes
+	prevNet  netCounters
+	prevTime time.Time
 }
 
 // NewCollector creates a stats collector.
-func NewCollector(devMode bool, wanIface string) *Collector {
+func NewCollector(wanIface string) *Collector {
 	c := &Collector{
-		devMode:   devMode,
-		wanIface:  wanIface,
-		startTime: time.Now(),
+		wanIface: wanIface,
 	}
 	// Seed CPU baseline so the first Collect() returns a non-zero %.
-	if !devMode {
-		if cpu, err := readCPUTimes(); err == nil {
-			c.prevCPU = cpu
-		}
+	if cpu, err := readCPUTimes(); err == nil {
+		c.prevCPU = cpu
 	}
 	return c
 }
 
-// Collect gathers a stats snapshot.
-// In dev mode, returns synthetic data.
+// Collect gathers a stats snapshot from /proc and system tools.
 func (c *Collector) Collect() (Snapshot, error) {
 	now := time.Now()
 	snap := Snapshot{
 		Timestamp: now.Unix(),
 	}
 
-	if c.devMode {
-		return c.collectDev(snap), nil
-	}
-
-	return c.collectReal(snap, now)
-}
-
-func (c *Collector) collectDev(snap Snapshot) Snapshot {
-	snap.CPUPercent = 25 + rand.Float64()*10 // 25-35%
-	snap.MemUsedMB = 512
-	snap.MemTotalMB = 8192
-	snap.UptimeSeconds = uint64(time.Since(c.startTime).Seconds())
-	snap.WANRxBps = 1000000 + uint64(rand.Int63n(500000))  // ~1-1.5 MB/s
-	snap.WANTxBps = 200000 + uint64(rand.Int63n(100000))   // ~200-300 KB/s
-	snap.ConnCount = 50 + uint64(rand.Int63n(30))
-	c.devDNSQueries += uint64(5 + rand.Int63n(20))
-	c.devDNSBlocked += uint64(rand.Int63n(3))
-	snap.DNSQueries = c.devDNSQueries
-	snap.DNSBlocked = c.devDNSBlocked
-	return snap
-}
-
-func (c *Collector) collectReal(snap Snapshot, now time.Time) (Snapshot, error) {
 	// CPU
 	cpu, err := readCPUTimes()
 	if err != nil {

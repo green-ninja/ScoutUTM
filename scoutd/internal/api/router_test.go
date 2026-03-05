@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -30,11 +31,38 @@ func testServer(t *testing.T) (*Server, func()) {
 	outputDir := filepath.Join(dir, "output")
 	engine := render.NewEngine(tmplDir, outputDir, true)
 	svcMgr := service.NewManager(true)
-	eveReader := ids.NewReader("", "", true)
-	scanner := netmon.NewScanner(true, "")
+	eveReader := ids.NewReader("", "")
+	scanner := testScanner(t, dir)
 	scanner.Scan()
 	srv := NewServer(store, sessions, hub, engine, svcMgr, eveReader, scanner, true, "0.1.0-test")
 	return srv, func() {}
+}
+
+// testScanner creates a scanner with temp ARP and lease files for testing.
+func testScanner(t *testing.T, dir string) *netmon.Scanner {
+	t.Helper()
+	arpFile := filepath.Join(dir, "arp")
+	arpData := "IP address       HW type     Flags       HW address            Mask     Device\n" +
+		"192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1\n" +
+		"192.168.1.101    0x1         0x2         aa:bb:cc:dd:ee:02     *        eth1\n" +
+		"192.168.1.102    0x1         0x2         aa:bb:cc:dd:ee:03     *        eth1\n" +
+		"192.168.1.103    0x1         0x2         aa:bb:cc:dd:ee:04     *        eth1\n" +
+		"192.168.1.104    0x1         0x2         aa:bb:cc:dd:ee:05     *        eth1\n" +
+		"192.168.1.105    0x1         0x2         aa:bb:cc:dd:ee:06     *        eth1\n"
+	os.WriteFile(arpFile, []byte(arpData), 0644)
+
+	leaseFile := filepath.Join(dir, "leases")
+	leaseData := "1999999999 aa:bb:cc:dd:ee:01 192.168.1.100 laptop 01:aa:bb:cc:dd:ee:01\n" +
+		"1999999999 aa:bb:cc:dd:ee:02 192.168.1.101 phone 01:aa:bb:cc:dd:ee:02\n" +
+		"1999999999 aa:bb:cc:dd:ee:03 192.168.1.102 tablet 01:aa:bb:cc:dd:ee:03\n" +
+		"1999999999 aa:bb:cc:dd:ee:04 192.168.1.103 smart-tv 01:aa:bb:cc:dd:ee:04\n" +
+		"1999999999 aa:bb:cc:dd:ee:05 192.168.1.104 gaming-pc 01:aa:bb:cc:dd:ee:05\n" +
+		"1999999999 aa:bb:cc:dd:ee:06 192.168.1.105 iot-hub 01:aa:bb:cc:dd:ee:06\n"
+	os.WriteFile(leaseFile, []byte(leaseData), 0644)
+
+	s := netmon.NewScanner(leaseFile)
+	s.SetARPFile(arpFile)
+	return s
 }
 
 // copyTemplates copies template files to a temp dir for tests.

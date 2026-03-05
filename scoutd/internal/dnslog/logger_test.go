@@ -24,9 +24,10 @@ func TestParseUnboundLine_ValidQuery(t *testing.T) {
 			"192.168.1.100": {mac: "aa:bb:cc:dd:ee:01", name: "laptop"},
 		},
 	}
-	logger := NewLogger("", false, lookup)
+	logger := NewLogger("", lookup)
 
-	line := `2024-01-15 10:30:45 unbound[1234]: [0] info: 192.168.1.100 www.google.com. A IN`
+	// Unix epoch 1705314645 = 2024-01-15 10:30:45 UTC
+	line := `[1705314645] unbound[1234:0] info: 192.168.1.100 www.google.com. A IN`
 	entry, ok := logger.ParseUnboundLine(line)
 
 	if !ok {
@@ -53,8 +54,8 @@ func TestParseUnboundLine_ValidQuery(t *testing.T) {
 }
 
 func TestParseUnboundLine_NonQueryLine(t *testing.T) {
-	logger := NewLogger("", false, nil)
-	line := `2024-01-15 10:30:45 unbound[1234]: notice: init module 0: validator`
+	logger := NewLogger("", nil)
+	line := `[1705314645] unbound[1234:0] notice: init module 0: validator`
 	_, ok := logger.ParseUnboundLine(line)
 	if ok {
 		t.Error("non-query line should not be parsed")
@@ -62,9 +63,9 @@ func TestParseUnboundLine_NonQueryLine(t *testing.T) {
 }
 
 func TestParseUnboundLine_UnknownDevice(t *testing.T) {
-	logger := NewLogger("", false, &mockLookup{devices: map[string]struct{ mac, name string }{}})
+	logger := NewLogger("", &mockLookup{devices: map[string]struct{ mac, name string }{}})
 
-	line := `2024-01-15 10:30:45 unbound[1234]: [0] info: 10.0.0.5 example.com. A IN`
+	line := `[1705314645] unbound[1234:0] info: 10.0.0.5 example.com. A IN`
 	entry, ok := logger.ParseUnboundLine(line)
 
 	if !ok {
@@ -79,11 +80,11 @@ func TestParseUnboundLine_UnknownDevice(t *testing.T) {
 }
 
 func TestRecentEntries_RingBuffer(t *testing.T) {
-	logger := NewLogger("", false, nil)
+	logger := NewLogger("", nil)
 
 	// Add more than MaxEntries.
 	for i := 0; i < MaxEntries+10; i++ {
-		logger.addEntry(Entry{Domain: string(rune('A' + (i % 26)))})
+		logger.AddEntry(Entry{Domain: string(rune('A' + (i % 26)))})
 	}
 
 	entries := logger.RecentEntries(5)
@@ -99,7 +100,7 @@ func TestRecentEntries_RingBuffer(t *testing.T) {
 }
 
 func TestRecentEntries_Empty(t *testing.T) {
-	logger := NewLogger("", false, nil)
+	logger := NewLogger("", nil)
 	entries := logger.RecentEntries(10)
 	if entries != nil {
 		t.Errorf("expected nil for empty buffer, got %d entries", len(entries))

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import * as api from '@/api/dns'
-import type { DNSConfig } from '@/api/types'
+import type { DNSConfig, DNSQueryEntry } from '@/api/types'
 import { ApiError } from '@/api/client'
 import ToggleSwitch from '@/components/ToggleSwitch.vue'
 import Toast from '@/components/Toast.vue'
 
 const config = ref<DNSConfig | null>(null)
+const queryLog = ref<DNSQueryEntry[]>([])
 const loading = ref(false)
 const toast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
 
@@ -18,10 +19,12 @@ onMounted(load)
 
 async function load() {
   try {
-    config.value = await api.getDns()
-    upstreamText.value = config.value.upstream.join('\n')
-    customBlockText.value = config.value.custom_block.join('\n')
-    customAllowText.value = config.value.custom_allow.join('\n')
+    const [c, q] = await Promise.all([api.getDns(), api.getQueryLog()])
+    config.value = c
+    queryLog.value = q
+    upstreamText.value = c.upstream.join('\n')
+    customBlockText.value = c.custom_block.join('\n')
+    customAllowText.value = c.custom_allow.join('\n')
   } catch {
     toast.value = { message: 'Failed to load DNS config', type: 'error' }
   }
@@ -49,6 +52,11 @@ async function save() {
   } finally {
     loading.value = false
   }
+}
+
+function formatTime(ts: string): string {
+  const d = new Date(ts)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 </script>
 
@@ -126,6 +134,39 @@ async function save() {
         >
           {{ loading ? 'Saving...' : 'Save' }}
         </button>
+      </div>
+
+      <!-- Query Log -->
+      <div class="bg-scout-800 rounded-lg p-6">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">Query Log</h3>
+        <div v-if="queryLog.length" class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead>
+              <tr class="text-gray-500 border-b border-scout-700">
+                <th class="pb-2 font-medium">Time</th>
+                <th class="pb-2 font-medium">Device</th>
+                <th class="pb-2 font-medium">Domain</th>
+                <th class="pb-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(entry, i) in queryLog" :key="i" class="border-b border-scout-700 last:border-0">
+                <td class="py-2 text-gray-400 whitespace-nowrap">{{ formatTime(entry.timestamp) }}</td>
+                <td class="py-2 text-white">{{ entry.device_name || entry.device_ip }}</td>
+                <td class="py-2 text-white font-mono text-xs">{{ entry.domain }}</td>
+                <td class="py-2">
+                  <span
+                    class="px-2 py-0.5 rounded text-xs font-medium"
+                    :class="entry.action === 'block' ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'"
+                  >
+                    {{ entry.action === 'block' ? 'Blocked' : 'Allowed' }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="text-gray-500 text-sm">No queries logged</p>
       </div>
     </div>
 

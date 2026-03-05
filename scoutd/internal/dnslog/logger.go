@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,21 +36,19 @@ type DeviceLookup interface {
 
 // Logger tails Unbound's query log and produces structured per-device entries.
 type Logger struct {
-	logDir     string
-	devMode    bool
-	lookup     DeviceLookup
-	mu         sync.RWMutex
-	entries    []Entry
-	head       int
-	count      int
-	running    bool
+	logDir  string
+	lookup  DeviceLookup
+	mu      sync.RWMutex
+	entries []Entry
+	head    int
+	count   int
+	running bool
 }
 
 // NewLogger creates a DNS query logger.
-func NewLogger(logDir string, devMode bool, lookup DeviceLookup) *Logger {
+func NewLogger(logDir string, lookup DeviceLookup) *Logger {
 	return &Logger{
 		logDir:  logDir,
-		devMode: devMode,
 		lookup:  lookup,
 		entries: make([]Entry, MaxEntries),
 	}
@@ -78,7 +77,8 @@ func (l *Logger) RecentEntries(n int) []Entry {
 	return result
 }
 
-func (l *Logger) addEntry(e Entry) {
+// AddEntry appends an entry to the ring buffer.
+func (l *Logger) AddEntry(e Entry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -89,10 +89,10 @@ func (l *Logger) addEntry(e Entry) {
 	}
 }
 
-// Unbound log-queries format:
-// [timestamp] unbound[pid]: [thread] info: IP query_name TYPE CLASS
+// Unbound logfile format (unix epoch):
+//   [1772738547] unbound[3220:0] info: 192.168.1.162 example.com. A IN
 var unboundQueryRe = regexp.MustCompile(
-	`(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*info:\s+(\S+)\s+(\S+)\s+(\S+)`,
+	`\[(\d+)\].*info:\s+(\S+)\s+(\S+)\s+(\S+)`,
 )
 
 // ParseUnboundLine parses a single Unbound log line into an Entry.
@@ -103,7 +103,8 @@ func (l *Logger) ParseUnboundLine(line string) (Entry, bool) {
 		return Entry{}, false
 	}
 
-	timestamp := m[1]
+	epoch, _ := strconv.ParseInt(m[1], 10, 64)
+	timestamp := time.Unix(epoch, 0).UTC().Format("2006-01-02 15:04:05")
 	clientIP := m[2]
 	domain := strings.TrimSuffix(m[3], ".")
 
@@ -181,13 +182,8 @@ func cleanOldLogs(logDir string, maxDays int) {
 }
 
 // TailFile tails a log file and processes new lines through the parser.
-// Blocks until the file exists or ctx is cancelled. In dev-mode, returns immediately.
+// Blocks until the file exists or done is closed.
 func (l *Logger) TailFile(logPath string, done <-chan struct{}) {
-	if l.devMode {
-		<-done
-		return
-	}
-
 	for {
 		select {
 		case <-done:
@@ -209,7 +205,8 @@ func (l *Logger) TailFile(logPath string, done <-chan struct{}) {
 		// Seek to end — only tail new entries.
 		f.Seek(0, 2)
 
-		scanner := bufio.NewScanner(f)
+		reader := bufio.NewReader(f)
+		var partial string
 		for {
 			select {
 			case <-done:
@@ -218,17 +215,22 @@ func (l *Logger) TailFile(logPath string, done <-chan struct{}) {
 			default:
 			}
 
-			if scanner.Scan() {
-				line := scanner.Text()
-				if entry, ok := l.ParseUnboundLine(line); ok {
-					l.addEntry(entry)
+			line, err := reader.ReadString('\n')
+			if len(line) > 0 {
+				partial += line
+				if strings.HasSuffix(partial, "\n") {
+					if entry, ok := l.ParseUnboundLine(strings.TrimRight(partial, "\n")); ok {
+						l.AddEntry(entry)
+					}
+					partial = ""
 				}
-			} else {
-				// No more lines — wait briefly and continue.
+			}
+			if err != nil {
+				// No more data — wait briefly and retry.
 				time.Sleep(500 * time.Millisecond)
 				// Check if file was rotated (inode changed).
-				newInfo, err := os.Stat(logPath)
-				if err != nil {
+				newInfo, statErr := os.Stat(logPath)
+				if statErr != nil {
 					break // File gone, reopen.
 				}
 				oldInfo, _ := f.Stat()

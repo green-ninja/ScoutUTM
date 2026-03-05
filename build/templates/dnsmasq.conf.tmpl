@@ -12,3 +12,10 @@ dhcp-range={{.Name}},{{.DHCPStart}},{{.DHCPEnd}},{{.Netmask}},{{.LeaseTime}}
 dhcp-option={{.Name}},3,{{.IP}}
 dhcp-option={{.Name}},6,{{.IP}}
 {{- end}}
+{{- if .StaticHosts}}
+
+# Static DHCP reservations for parental controls.
+{{- range .StaticHosts}}
+dhcp-host={{.MAC}},{{.IP}}
+{{- end}}
+{{- end}}

@@ -187,3 +187,12 @@ export interface SystemAbout {
   uptime: number
   go_version: string
 }
+
+export interface DNSQueryEntry {
+  timestamp: string
+  device_mac: string
+  device_ip: string
+  device_name: string
+  domain: string
+  action: string
+}

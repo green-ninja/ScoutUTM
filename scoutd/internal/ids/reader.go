@@ -94,7 +94,6 @@ type Reader struct {
 	socketPath string
 	logPath    string
 	alerts     *RingBuffer
-	devMode    bool
 
 	// OnAlert is called when a new alert is parsed, before ring buffer insert.
 	OnAlert func(Alert)
@@ -104,12 +103,11 @@ type Reader struct {
 }
 
 // NewReader creates an EVE alert reader.
-func NewReader(socketPath, logPath string, devMode bool) *Reader {
+func NewReader(socketPath, logPath string) *Reader {
 	return &Reader{
 		socketPath: socketPath,
 		logPath:    logPath,
 		alerts:     NewRingBuffer(),
-		devMode:    devMode,
 	}
 }
 
@@ -118,14 +116,8 @@ func (r *Reader) Alerts() *RingBuffer {
 	return r.alerts
 }
 
-// Run starts reading EVE alerts. In dev-mode, blocks until context is cancelled.
-// In production, listens on a Unix datagram socket for Suricata EVE output.
+// Run starts reading EVE alerts from a Unix datagram socket.
 func (r *Reader) Run(ctx context.Context) {
-	if r.devMode {
-		<-ctx.Done()
-		return
-	}
-
 	if r.logPath != "" {
 		r.openLog()
 		defer r.closeLog()

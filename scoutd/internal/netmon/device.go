@@ -20,19 +20,24 @@ type Device struct {
 
 // Scanner discovers devices on the local network via ARP table and DHCP leases.
 type Scanner struct {
-	devMode   bool
 	leaseFile string
+	arpFile   string
 	mu        sync.RWMutex
 	devices   map[string]*Device
 }
 
 // NewScanner creates a Scanner.
-func NewScanner(devMode bool, leaseFile string) *Scanner {
+func NewScanner(leaseFile string) *Scanner {
 	return &Scanner{
-		devMode:   devMode,
 		leaseFile: leaseFile,
+		arpFile:   "/proc/net/arp",
 		devices:   make(map[string]*Device),
 	}
+}
+
+// SetARPFile overrides the ARP table path (for testing).
+func (s *Scanner) SetARPFile(path string) {
+	s.arpFile = path
 }
 
 // Devices returns a snapshot of all discovered devices.
@@ -49,22 +54,13 @@ func (s *Scanner) Devices() []Device {
 // Scan reads the ARP table and DHCP leases, merging results into the device map.
 // Devices seen in ARP are marked online; others are marked offline.
 func (s *Scanner) Scan() error {
-	var arpEntries []arpEntry
-	var leases []dhcpLease
-	var err error
-
-	if s.devMode {
-		arpEntries = syntheticARPEntries()
-		leases = syntheticDHCPLeases()
-	} else {
-		arpEntries, err = readARPTable()
-		if err != nil {
-			return err
-		}
-		leases, err = readDHCPLeases(s.leaseFile)
-		if err != nil {
-			return err
-		}
+	arpEntries, err := parseARPFile(s.arpFile)
+	if err != nil {
+		return err
+	}
+	leases, err := readDHCPLeases(s.leaseFile)
+	if err != nil {
+		return err
 	}
 
 	// Build hostname lookup from DHCP leases.

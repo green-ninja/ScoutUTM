@@ -384,6 +384,262 @@ func TestValidate_ParentalTagCollision(t *testing.T) {
 	}
 }
 
+// --- Input sanitization tests (config injection prevention) ---
+
+func TestValidate_ZoneNameFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		zone    string
+		wantErr bool
+	}{
+		{"valid", "iot", false},
+		{"valid_underscore", "iot_devices", false},
+		{"valid_uppercase", "DMZ", false},
+		{"starts_with_digit", "1zone", true},
+		{"contains_space", "my zone", true},
+		{"contains_semicolon", "lan;drop", true},
+		{"contains_newline", "lan\nchain", true},
+		{"contains_hyphen", "my-zone", true}, // hyphens not allowed in nftables identifiers
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Network.Zones = append(cfg.Network.Zones, ZoneConfig{Name: tt.zone, InputPolicy: "drop", ForwardPolicy: "drop", OutputPolicy: "accept"})
+			errs := Validate(cfg)
+			hasErr := hasField(errs, "network.zones[2].name")
+			if tt.wantErr && !hasErr {
+				t.Errorf("expected error for zone name %q", tt.zone)
+			}
+			if !tt.wantErr && hasErr {
+				t.Errorf("unexpected error for zone name %q", tt.zone)
+			}
+		})
+	}
+}
+
+func TestValidate_InterfaceNameFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		iface   string
+		wantErr bool
+	}{
+		{"valid_simple", "eth0", false},
+		{"valid_vlan", "eth1.20", false},
+		{"valid_bridge", "br0", false},
+		{"valid_wg", "wg0", false},
+		{"contains_space", "eth 0", true},
+		{"contains_newline", "eth0\n", true},
+		{"contains_semicolon", "eth0;rm", true},
+		{"too_long", "abcdefghijklmnop", true}, // 16 chars, max 15
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Network.Interfaces = append(cfg.Network.Interfaces, InterfaceConfig{Name: tt.iface, Zone: "lan"})
+			errs := Validate(cfg)
+			hasErr := hasField(errs, "network.interfaces[2].name")
+			if tt.wantErr && !hasErr {
+				t.Errorf("expected error for interface name %q", tt.iface)
+			}
+			if !tt.wantErr && hasErr {
+				t.Errorf("unexpected error for interface name %q", tt.iface)
+			}
+		})
+	}
+}
+
+func TestValidate_FirewallRuleProto(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.Rules = []FirewallRule{
+		{Name: "test", Src: "lan", Dest: "wan", Proto: "invalid", Port: 80, Action: "accept"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.rules[0].proto") {
+		t.Error("expected error for invalid proto")
+	}
+}
+
+func TestValidate_FirewallRuleProtoValid(t *testing.T) {
+	for _, proto := range []string{"tcp", "udp", "icmp", ""} {
+		cfg := DefaultConfig()
+		cfg.Firewall.Rules = []FirewallRule{
+			{Name: "test", Src: "lan", Dest: "wan", Proto: proto, Port: 80, Action: "accept"},
+		}
+		errs := Validate(cfg)
+		if hasField(errs, "firewall.rules[0].proto") {
+			t.Errorf("proto %q should be valid", proto)
+		}
+	}
+}
+
+func TestValidate_FirewallRuleAction(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.Rules = []FirewallRule{
+		{Name: "test", Src: "lan", Dest: "wan", Proto: "tcp", Port: 80, Action: "invalid"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.rules[0].action") {
+		t.Error("expected error for invalid action")
+	}
+}
+
+func TestValidate_FirewallRuleActionInjection(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.Rules = []FirewallRule{
+		{Name: "test", Src: "lan", Dest: "wan", Proto: "tcp", Port: 80, Action: "accept; drop"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.rules[0].action") {
+		t.Error("expected error for action with injection attempt")
+	}
+}
+
+func TestValidate_FirewallRuleSrcDest(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.Rules = []FirewallRule{
+		{Name: "test", Src: "nonexistent", Dest: "wan", Proto: "tcp", Port: 80, Action: "accept"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.rules[0].src") {
+		t.Error("expected error for rule referencing unknown src zone")
+	}
+
+	cfg2 := DefaultConfig()
+	cfg2.Firewall.Rules = []FirewallRule{
+		{Name: "test", Src: "lan", Dest: "fakezone", Proto: "tcp", Port: 80, Action: "drop"},
+	}
+	errs2 := Validate(cfg2)
+	if !hasField(errs2, "firewall.rules[0].dest") {
+		t.Error("expected error for rule referencing unknown dest zone")
+	}
+}
+
+func TestValidate_FirewallRuleName(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.Rules = []FirewallRule{
+		{Name: "test\nchain evil {}", Src: "lan", Dest: "wan", Proto: "tcp", Port: 80, Action: "accept"},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.rules[0].name") {
+		t.Error("expected error for rule name with newline injection")
+	}
+}
+
+func TestValidate_PortForwardProto(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.PortForwards = []PortForward{
+		{Name: "test", Proto: "icmp", SrcPort: 80, DestIP: "192.168.1.100", DestPort: 80},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.port_forwards[0].proto") {
+		t.Error("expected error for port forward with icmp proto")
+	}
+}
+
+func TestValidate_PortForwardName(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Firewall.PortForwards = []PortForward{
+		{Name: "test\niifname eth0 accept", Proto: "tcp", SrcPort: 80, DestIP: "192.168.1.100", DestPort: 80},
+	}
+	errs := Validate(cfg)
+	if !hasField(errs, "firewall.port_forwards[0].name") {
+		t.Error("expected error for port forward name with newline injection")
+	}
+}
+
+func TestValidate_NTPServerFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		ntp     string
+		wantErr bool
+	}{
+		{"valid_domain", "pool.ntp.org", false},
+		{"valid_ip", "1.2.3.4", false},
+		{"valid_subdomain", "time.google.com", false},
+		{"injection_newline", "evil.com\nallow 0.0.0.0/0", true},
+		{"injection_space", "evil.com iburst\nallow", true},
+		{"empty", "", true},
+		{"bare_word", "localhost", true}, // not a valid domain (no TLD dot)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.System.NTPServers = []string{tt.ntp}
+			errs := Validate(cfg)
+			hasErr := hasField(errs, "system.ntp_servers[0]")
+			if tt.wantErr && !hasErr {
+				t.Errorf("expected error for NTP server %q", tt.ntp)
+			}
+			if !tt.wantErr && hasErr {
+				t.Errorf("unexpected error for NTP server %q", tt.ntp)
+			}
+		})
+	}
+}
+
+func TestValidate_MACAddressFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		mac     string
+		wantErr bool
+	}{
+		{"valid_lower", "aa:bb:cc:dd:ee:ff", false},
+		{"valid_upper", "AA:BB:CC:DD:EE:FF", false},
+		{"valid_mixed", "aA:bB:01:23:45:67", false},
+		{"injection_comma", "aa:bb:cc:dd:ee:ff,set:evil", true},
+		{"injection_newline", "aa:bb:cc:dd:ee:ff\ndhcp-host=ff:ff:ff:ff:ff:ff", true},
+		{"too_short", "aa:bb:cc", true},
+		{"dash_separated", "aa-bb-cc-dd-ee-ff", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Parental.Profiles = []ParentalProfile{
+				{ID: "p1", Name: "Kids", BlockCategories: []string{}},
+			}
+			cfg.Parental.Devices = []ParentalDevice{
+				{MAC: tt.mac, ProfileID: "p1", IP: "192.168.1.100"},
+			}
+			errs := Validate(cfg)
+			hasErr := hasField(errs, "parental.devices[0].mac")
+			if tt.wantErr && !hasErr {
+				t.Errorf("expected error for MAC %q", tt.mac)
+			}
+			if !tt.wantErr && hasErr {
+				t.Errorf("unexpected error for MAC %q", tt.mac)
+			}
+		})
+	}
+}
+
+func TestValidate_IDSRulesetName(t *testing.T) {
+	tests := []struct {
+		name    string
+		ruleset string
+		wantErr bool
+	}{
+		{"valid", "et-open", false},
+		{"valid_underscore", "custom_rules", false},
+		{"path_traversal", "../../etc/passwd", true},
+		{"yaml_injection", "rules\n  - evil", true},
+		{"space", "et open", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.IDS.Rulesets = []string{tt.ruleset}
+			errs := Validate(cfg)
+			hasErr := hasField(errs, "ids.rulesets[0]")
+			if tt.wantErr && !hasErr {
+				t.Errorf("expected error for ruleset %q", tt.ruleset)
+			}
+			if !tt.wantErr && hasErr {
+				t.Errorf("unexpected error for ruleset %q", tt.ruleset)
+			}
+		})
+	}
+}
+
 func hasField(errs []ValidationError, field string) bool {
 	for _, e := range errs {
 		if e.Field == field {

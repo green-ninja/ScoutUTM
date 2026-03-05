@@ -122,7 +122,7 @@ func main() {
 
 	// Stats collector + broadcast goroutine.
 	wanIface := wanInterfaceName(store.Current())
-	collector := stats.NewCollector(devMode, wanIface)
+	collector := stats.NewCollector(wanIface)
 	statsCtx, statsCancel := context.WithCancel(context.Background())
 	go func() {
 		ticker := time.NewTicker(hub.StatsInterval())
@@ -164,7 +164,6 @@ func main() {
 	eveReader := ids.NewReader(
 		"/var/run/suricata/eve.sock",
 		"/var/lib/scout/suricata/eve.json",
-		devMode,
 	)
 	// Bridge EVE alerts → WebSocket hub.
 	eveReader.OnAlert = func(alert ids.Alert) {
@@ -175,12 +174,12 @@ func main() {
 
 	// Scheduler.
 	eveLogPath := "/var/lib/scout/suricata/eve.json"
-	sched := scheduler.New(devMode)
+	sched := scheduler.New()
 	sched.Register(scheduler.Task{
 		Name:  "suricata-update",
 		RunAt: "03:00",
 		Fn: func(ctx context.Context) error {
-			if err := svcMgr.RunCommand("suricata-update"); err != nil {
+			if err := svcMgr.SuricataUpdate(); err != nil {
 				return err
 			}
 			return svcMgr.ReloadDaemons([]string{"suricata"})
@@ -197,7 +196,7 @@ func main() {
 	go sched.Start(schedCtx)
 
 	// Network device scanner.
-	scanner := netmon.NewScanner(devMode, "/var/lib/misc/dnsmasq.leases")
+	scanner := netmon.NewScanner("/var/lib/misc/dnsmasq.leases")
 	if err := scanner.Scan(); err != nil {
 		log.Printf("warning: initial device scan: %v", err)
 	}
@@ -230,7 +229,7 @@ func main() {
 
 	// DNS query logger.
 	dnsLogDir := dnslog.DefaultLogDir
-	dnsLogger := dnslog.NewLogger(dnsLogDir, devMode, scanner)
+	dnsLogger := dnslog.NewLogger(dnsLogDir, scanner)
 	dnsLogDone := make(chan struct{})
 	go dnsLogger.TailFile(filepath.Join(dnsLogDir, dnslog.DefaultLogFile), dnsLogDone)
 

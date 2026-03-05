@@ -4,7 +4,7 @@ This document explains how to build, test, and develop ScoutUTM across both tier
 
 ## Prerequisites
 
-- **Go 1.21+** installed (on this system: `/usr/local/go/bin/go`, in WSL only)
+- **Go 1.22+** installed (on this system: `/usr/local/go/bin/go`, in WSL only)
 - **VirtualBox** installed on Windows host (for Vagrant VM)
 - **Vagrant** installed on Windows host (for Vagrant VM)
 - **WSL2** for Go builds (Go is not installed on Windows)
@@ -49,7 +49,7 @@ The binary is pure static Go (`CGO_ENABLED=0`, no cgo). Output goes to `build/sc
 ### Running Unit Tests
 
 ```bash
-# All tests across all packages (170 tests, 5 packages)
+# All tests across all packages (284 tests, 12 packages)
 cd scoutd && /usr/local/go/bin/go test ./...
 
 # Single package:
@@ -57,6 +57,9 @@ cd scoutd && /usr/local/go/bin/go test ./internal/config/...
 cd scoutd && /usr/local/go/bin/go test ./internal/render/...
 cd scoutd && /usr/local/go/bin/go test ./internal/api/...
 cd scoutd && /usr/local/go/bin/go test ./internal/service/...
+cd scoutd && /usr/local/go/bin/go test ./internal/parental/...
+cd scoutd && /usr/local/go/bin/go test ./internal/netmon/...
+cd scoutd && /usr/local/go/bin/go test ./internal/ids/...
 
 # Verbose output:
 cd scoutd && /usr/local/go/bin/go test -v ./internal/api/...
@@ -65,12 +68,19 @@ cd scoutd && /usr/local/go/bin/go test -v ./internal/api/...
 cd scoutd && /usr/local/go/bin/go test -v -run TestCreatePeer_SplitTunnel ./internal/api/...
 ```
 
-**What the unit tests cover (170 tests):**
-- `internal/config/` -- Config loading, saving, validation, schema migrations
-- `internal/render/` -- Template rendering for all daemon configs (nftables, dnsmasq, chrony, unbound, wireguard, suricata)
-- `internal/api/` -- REST API handlers via httptest (firewall CRUD, network/zones CRUD, VLANs, VPN/WireGuard, system, auth, config apply)
-- `internal/service/` -- Service manager dependency ordering
-- `internal/auth/` -- Session management
+**What the unit tests cover (284 tests):**
+- `internal/api/` (94) -- REST API handlers via httptest (firewall CRUD, network/zones CRUD, VLANs, VPN/WireGuard, IDS, devices, parental, wizard, system, auth, config apply)
+- `internal/render/` (60) -- Template rendering for all daemon configs (nftables, dnsmasq, chrony, unbound, wireguard, suricata)
+- `internal/config/` (46) -- Config loading, saving, validation, schema migrations
+- `internal/netmon/` (14) -- ARP scanning, DHCP lease parsing, device fingerprinting, OUI lookup
+- `internal/parental/` (13) -- Schedule enforcement, blocked device IPs, time range detection
+- `internal/auth/` (13) -- Session management, bcrypt password hashing
+- `internal/ids/` (11) -- EVE event parsing, alert deduplication, log rotation
+- `internal/dnslog/` (8) -- Unbound log parsing, ring buffer, log rotation
+- `internal/ws/` (8) -- WebSocket hub broadcast, max clients, non-blocking send
+- `internal/scheduler/` (6) -- Dev-mode task suppression, interval/RunAt timing
+- `internal/stats/` (6) -- CPU, memory, uptime, throughput, conntrack (dev-mode synthetic data)
+- `internal/service/` (5) -- Service manager dependency ordering
 
 ### Running scoutd Locally (Dev Mode)
 
@@ -114,15 +124,23 @@ vagrant destroy -f
 vagrant up
 ```
 
-The Vagrantfile configures:
+The Vagrantfile configures two VMs:
+
+**UTM VM (`utm`, primary):**
 - **Box:** `generic/alpine319` (Alpine Linux 3.19)
 - **Resources:** 4 CPUs, 8 GB RAM
 - **Port forwards:** host `8443` -> guest `443` (HTTPS), host `8080` -> guest `80` (HTTP)
-- **Private network:** `192.168.56.10`
+- **LAN interface:** `192.168.1.1/24` on VirtualBox internal network `scoutlan`
 - **Synced folders:** `build/` -> `/opt/scout-build`, `tests/` -> `/opt/scout-tests`
 
+**Client VM (`client`):**
+- **Box:** `generic/alpine319` (lightweight LAN client)
+- **Resources:** 1 CPU, 512 MB RAM
+- **LAN interface:** DHCP from ScoutUTM on VirtualBox internal network `scoutlan`
+- **No port forwards, no synced folders**
+
 Provisioning (`tools/vagrant-provision.sh`) does:
-1. Flushes nftables rules (SSH protection)
+1. Flushes nftables rules (SSH protection), enables IP forwarding
 2. Installs Alpine packages (nftables, unbound, dnsmasq, chrony, wireguard-tools, etc.)
 3. Installs scoutd binary and templates from `/opt/scout-build`
 4. Installs default config, sets admin password to `admin`
@@ -132,10 +150,11 @@ Provisioning (`tools/vagrant-provision.sh`) does:
 8. Loads nftables rules, starts all daemons
 9. Runs all integration tests automatically
 
-### Accessing the VM
+### Accessing the VMs
 
 ```bash
-vagrant ssh
+vagrant ssh utm       # UTM appliance (default — also works with just `vagrant ssh`)
+vagrant ssh client    # LAN client
 ```
 
 ### Accessing the Web UI
@@ -162,15 +181,19 @@ vagrant provision
 
 All integration tests run at the end of `vagrant up` / `vagrant provision`. You'll see pass/fail results directly in the terminal output.
 
-To re-run tests manually inside the VM:
+To re-run tests manually inside the UTM VM:
 
 ```bash
-vagrant ssh
+vagrant ssh utm
 /opt/scout-tests/smoke_test.sh
 /opt/scout-tests/api_test.sh
 /opt/scout-tests/network_test.sh
 /opt/scout-tests/vlan_test.sh
 /opt/scout-tests/vpn_test.sh
+/opt/scout-tests/parental_test.sh
+/opt/scout-tests/ids_test.sh
+/opt/scout-tests/wizard_test.sh
+/opt/scout-tests/stress_test.sh
 ```
 
 ### Rebuilding the VM from Scratch
@@ -185,16 +208,14 @@ vagrant ssh
 
 Each test script is self-contained and idempotent -- it cleans up any resources it creates. Tests that check nftables state reload rules via `nft -f /etc/nftables.conf` since scoutd runs in dev-mode (stubs service reloads).
 
-### smoke_test.sh (10 checks)
+### smoke_test.sh (8 checks)
 Verifies the basics are working:
 1. Health endpoint returns `healthy=true`
 2. Version field present in health response
 3. Config file exists at `/etc/scout/config.json` and is valid JSON
 4. Config has all top-level keys (version, system, network, firewall, dns, vpn, ids, parental, update)
-5. Services running: nftables, dnsmasq, chronyd, scoutd
-6. Suricata status (warning if not running -- needs rules, Month 5)
-7. Unbound running
-8. TLS certificate and key exist
+5. Services running: nftables, dnsmasq, chronyd, scoutd, suricata (warning if not running), unbound
+6. TLS certificate and key exist
 
 ### api_test.sh (12 checks)
 Exercises the REST API:
@@ -253,6 +274,119 @@ Tests WireGuard VPN end-to-end:
 16. Regenerate server keys changes public key and clears all peers
 17. WireGuard config file exists (dev-mode, service management stubbed)
 
+### parental_test.sh (15 checks)
+Tests parental controls end-to-end:
+1. Create parental profile (name, block categories, safe search, YouTube restricted, schedule)
+2. List profiles -- verify profile appears
+3. List devices -- check at least one available
+4. Assign device to profile
+5. Config has device with static IP
+6. dnsmasq.conf has `dhcp-host=` static DHCP reservation
+7. unbound.conf has `access-control-tag:` and `define-tag:` for parental filtering
+8. unbound.conf has Google safe search CNAME override
+9. unbound.conf has YouTube restricted mode CNAME override
+10. unbound.conf has parental RPZ zones
+11. Device response includes manufacturer field (OUI lookup)
+12. DNS query log endpoint returns array
+13. Cleanup (remove test profile)
+
+### ids_test.sh (16 checks)
+Tests Suricata IDS/IPS configuration and mode switching:
+1. IDS enabled by default, mode is `ids`
+2. suricata.yaml rendered at `/etc/suricata/suricata.yaml`
+3. suricata.yaml has HOME_NET, fail-open, unix_dgram EVE output
+4. Switch to IPS mode via API
+5. nftables IPS chain exists with NFQUEUE fanout
+6. Forward chain jumps to IPS chain
+7. Switch back to IDS mode
+8. IPS chain removed in IDS mode
+9. Disable IDS via API
+10. Re-enable IDS via API
+11. Alerts endpoint returns empty array (no Suricata running in dev-mode)
+12. Invalid mode rejected with error
+
+### wizard_test.sh (10 checks)
+Tests setup wizard end-to-end flow:
+1. Pre-check: `setup_done` is false (fresh config)
+2. Step 1: Welcome (returns 200)
+3. Step 2: Set password (returns 200), short password rejected (returns 400)
+4. Step 3: Network detection returns interfaces
+5. Step 4: LAN config (returns 200)
+6. Step 5: Security defaults -- IDS, malware/phishing blocking (returns 200)
+7. Step 6: VLAN setup skipped (returns 200)
+8. Step 7: Apply (returns 200)
+9. Verify `setup_done` flipped to true
+10. Wizard returns 403 after setup complete
+
+### stress_test.sh (7 checks)
+Tests WebSocket and HTTP concurrency:
+1. 20 concurrent health endpoint requests complete
+2. 10 concurrent authenticated device list requests complete
+3. 10 concurrent alert endpoint requests complete
+4. (With websocat) 10 concurrent WebSocket connections maintained
+5. (With websocat) 11th WebSocket connection rejected (max clients)
+6. (With websocat) Stats broadcast received within 6 seconds
+
+Note: Falls back to HTTP-only tests if `websocat` is not installed.
+
+### client_test.sh (7 checks)
+Runs ON the client VM (not the UTM). Verifies end-to-end traffic flow through ScoutUTM:
+1. Client has DHCP lease from ScoutUTM (IP in 192.168.1.100-253)
+2. Default gateway is 192.168.1.1
+3. DNS resolver is 192.168.1.1
+4. DNS resolution works (nslookup via ScoutUTM's Unbound)
+5. Internet access works through ScoutUTM (curl external site)
+6. ScoutUTM web UI accessible at https://192.168.1.1
+7. ScoutUTM health API returns healthy
+
+To run manually:
+```bash
+vagrant ssh client -c "sh /opt/scout-tests/client_test.sh"
+```
+
+Note: This test is NOT run automatically during UTM provisioning (it runs on a different VM). It runs during client VM provisioning via `tools/client-provision.sh` connectivity checks.
+
+---
+
+## LAN Client VM
+
+The client VM simulates a device on the home network with all traffic routed through ScoutUTM.
+
+### Network Topology
+
+```
+Host Machine
+  │
+  ├─ Port Forward: 8443 → utm:443 (Web UI)
+  ├─ Port Forward: 8080 → utm:80
+  │
+  ┌──────────────────────────────────────────┐
+  │  VirtualBox NAT (10.0.2.x)              │
+  │    ├─ utm:eth0 (WAN, DHCP)              │
+  │    └─ client:eth0 (Vagrant SSH only)    │
+  └──────────────────────────────────────────┘
+  ┌──────────────────────────────────────────┐
+  │  VirtualBox Internal Net "scoutlan"      │
+  │    ├─ utm:eth1 = 192.168.1.1/24 (LAN)  │
+  │    └─ client:eth1 = DHCP (192.168.1.x) │
+  └──────────────────────────────────────────┘
+```
+
+Traffic flow: `client → eth1 → [intnet] → utm:eth1 → nftables → utm:eth0 → [NAT] → internet`
+
+### What the Client Provisioning Does
+
+1. Installs `curl` and `bind-tools`
+2. Gets DHCP lease on eth1 from ScoutUTM's dnsmasq
+3. Replaces default route to go through ScoutUTM (192.168.1.1)
+4. Keeps eth0 route for Vagrant SSH (10.0.2.x)
+5. Runs connectivity checks (ping, DNS, HTTP, HTTPS)
+
+### Limitations
+
+- scoutd runs in `--dev-mode`, so the device scanner returns synthetic devices — the client VM won't appear in the web UI's Devices page
+- Internet access depends on VirtualBox NAT on the UTM's eth0 working for forwarded traffic
+
 ---
 
 ## Placeholder Test Scripts
@@ -261,14 +395,11 @@ The following test scripts exist but are not yet implemented (empty files for fu
 
 | Script | What It Tests | Month |
 |--------|--------------|-------|
-| `tests/dns_test.sh` | Unbound recursive resolution, DNSSEC, RPZ blocklists, custom allow/block | 5 (with real blocklist data) |
-| `tests/ids_test.sh` | Suricata alert on test signature, eve.json socket, fail-open | 5 |
-| `tests/rollback_test.sh` | Config apply failure triggers rollback, startup recovery, rapid save serialization | 5 (with multi-daemon rollback) |
-| `tests/stress_test.sh` | nmap alert storm, WebSocket rate limiting, no OOM or crash | 7 |
+| `tests/dns_test.sh` | Unbound recursive resolution, DNSSEC, RPZ blocklists, custom allow/block | TBD (with real blocklist data) |
+| `tests/rollback_test.sh` | Config apply failure triggers rollback, startup recovery, rapid save serialization | TBD (with multi-daemon rollback) |
 | `tests/update_test.sh` | RAUC bundle install, reboot, version check, bad bundle rollback | 9 |
-| `tests/wizard_test.sh` | Setup wizard end-to-end: all 7 steps | 7 |
 | `tests/qa_test.sh` | Full production QA (hardware, Month 10+) | 10 |
-| `tests/run_all.sh` | Run all test scripts in sequence | 5 |
+| `tests/run_all.sh` | Run all test scripts in sequence | TBD |
 
 ---
 

@@ -2,8 +2,8 @@ package stats
 
 import "testing"
 
-func TestCollector_DevMode_ReturnsData(t *testing.T) {
-	c := NewCollector(true, "eth0")
+func TestCollector_ReturnsData(t *testing.T) {
+	c := NewCollector("eth0")
 	snap, err := c.Collect()
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -13,51 +13,33 @@ func TestCollector_DevMode_ReturnsData(t *testing.T) {
 		t.Error("Timestamp should be non-zero")
 	}
 	if snap.MemTotalMB == 0 {
-		t.Error("MemTotalMB should be non-zero in dev mode")
-	}
-	if snap.MemUsedMB == 0 {
-		t.Error("MemUsedMB should be non-zero in dev mode")
+		t.Error("MemTotalMB should be non-zero")
 	}
 }
 
-func TestCollector_DevMode_CPUInRange(t *testing.T) {
-	c := NewCollector(true, "eth0")
+func TestCollector_CPUNonNegative(t *testing.T) {
+	c := NewCollector("eth0")
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		snap, err := c.Collect()
 		if err != nil {
 			t.Fatalf("Collect: %v", err)
 		}
-		if snap.CPUPercent < 25 || snap.CPUPercent > 35 {
-			t.Errorf("CPUPercent = %f, want 25-35", snap.CPUPercent)
+		if snap.CPUPercent < 0 || snap.CPUPercent > 100 {
+			t.Errorf("CPUPercent = %f, want 0-100", snap.CPUPercent)
 		}
 	}
 }
 
-func TestCollector_DevMode_UptimeIncreases(t *testing.T) {
-	c := NewCollector(true, "eth0")
+func TestCollector_UptimeNonZero(t *testing.T) {
+	c := NewCollector("eth0")
 	snap, err := c.Collect()
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	// Uptime should be >= 0 (just started).
-	if snap.UptimeSeconds > 60 {
-		t.Errorf("UptimeSeconds = %d, expected small value for fresh collector", snap.UptimeSeconds)
-	}
-}
-
-func TestCollector_DevMode_DNSCountsAccumulate(t *testing.T) {
-	c := NewCollector(true, "eth0")
-	var prev Snapshot
-	for i := 0; i < 5; i++ {
-		snap, err := c.Collect()
-		if err != nil {
-			t.Fatalf("Collect: %v", err)
-		}
-		if i > 0 && snap.DNSQueries <= prev.DNSQueries {
-			t.Errorf("DNSQueries should accumulate: got %d, prev %d", snap.DNSQueries, prev.DNSQueries)
-		}
-		prev = snap
+	// System has been up for at least a second.
+	if snap.UptimeSeconds == 0 {
+		t.Error("UptimeSeconds should be non-zero")
 	}
 }
 

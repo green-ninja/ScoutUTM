@@ -3,7 +3,8 @@ server:
     interface: {{.ListenAddr}}
     port: {{.Port}}
     do-daemonize: no
-    use-syslog: yes
+    use-syslog: no
+    logfile: "/var/lib/scout/logs/dns-query.log"
     verbosity: 1
 {{- range .AccessNets}}
     access-control: {{.}} allow

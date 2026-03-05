@@ -65,15 +65,3 @@ func parseARP(scanner *bufio.Scanner) ([]arpEntry, error) {
 
 	return entries, scanner.Err()
 }
-
-// syntheticARPEntries returns dev-mode test data.
-func syntheticARPEntries() []arpEntry {
-	return []arpEntry{
-		{IP: "192.168.1.100", MAC: "aa:bb:cc:dd:ee:01", Interface: "eth1"},
-		{IP: "192.168.1.101", MAC: "aa:bb:cc:dd:ee:02", Interface: "eth1"},
-		{IP: "192.168.1.102", MAC: "aa:bb:cc:dd:ee:03", Interface: "eth1"},
-		{IP: "192.168.1.103", MAC: "aa:bb:cc:dd:ee:04", Interface: "eth1"},
-		{IP: "192.168.1.104", MAC: "aa:bb:cc:dd:ee:05", Interface: "eth1"},
-		{IP: "192.168.1.105", MAC: "aa:bb:cc:dd:ee:06", Interface: "eth1"},
-	}
-}

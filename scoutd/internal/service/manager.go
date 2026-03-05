@@ -56,13 +56,13 @@ func (m *Manager) ReloadDaemons(daemons []string) error {
 	return nil
 }
 
-// RunCommand executes a system command. In dev-mode, it only logs.
-func (m *Manager) RunCommand(name string, args ...string) error {
+// SuricataUpdate runs suricata-update to fetch new rule signatures.
+func (m *Manager) SuricataUpdate() error {
 	if m.devMode {
-		log.Printf("[dev-mode] would run command: %s %v", name, args)
+		log.Printf("[dev-mode] would run suricata-update")
 		return nil
 	}
-	return runCmd(name, args...)
+	return runCmd("suricata-update")
 }
 
 // HealthCheck verifies that reloaded daemons are running correctly.

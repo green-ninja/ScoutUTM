@@ -17,14 +17,12 @@ type Task struct {
 // Scheduler runs periodic tasks.
 type Scheduler struct {
 	tasks   []Task
-	devMode bool
 	nextRun map[string]time.Time
 }
 
 // New creates a scheduler.
-func New(devMode bool) *Scheduler {
+func New() *Scheduler {
 	return &Scheduler{
-		devMode: devMode,
 		nextRun: make(map[string]time.Time),
 	}
 }
@@ -34,13 +32,8 @@ func (s *Scheduler) Register(t Task) {
 	s.tasks = append(s.tasks, t)
 }
 
-// Start runs the scheduler loop. In dev-mode, blocks until context is cancelled.
+// Start runs the scheduler loop. Blocks until context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) {
-	if s.devMode {
-		<-ctx.Done()
-		return
-	}
-
 	// Compute initial next-run times.
 	now := time.Now()
 	for _, t := range s.tasks {

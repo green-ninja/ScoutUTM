@@ -54,7 +54,7 @@ func TestRingBuffer_OverflowOrdering(t *testing.T) {
 }
 
 func TestProcessLine_ValidAlert(t *testing.T) {
-	r := NewReader("", "", true)
+	r := NewReader("", "")
 
 	ev := eveEvent{
 		Timestamp: "2025-01-15T10:30:00.123456+0000",
@@ -90,7 +90,7 @@ func TestProcessLine_ValidAlert(t *testing.T) {
 }
 
 func TestProcessLine_NonAlertIgnored(t *testing.T) {
-	r := NewReader("", "", true)
+	r := NewReader("", "")
 
 	ev := eveEvent{
 		EventType: "stats",
@@ -106,7 +106,7 @@ func TestProcessLine_NonAlertIgnored(t *testing.T) {
 }
 
 func TestProcessLine_InvalidJSONIgnored(t *testing.T) {
-	r := NewReader("", "", true)
+	r := NewReader("", "")
 	r.processLine([]byte("not json"))
 
 	alerts := r.alerts.All()

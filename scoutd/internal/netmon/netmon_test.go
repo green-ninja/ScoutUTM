@@ -2,6 +2,8 @@ package netmon
 
 import (
 	"bufio"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -102,15 +104,46 @@ func TestParseLeases_SkipsComments(t *testing.T) {
 	}
 }
 
-func TestScanner_DevMode(t *testing.T) {
-	s := NewScanner(true, "")
+// testScanner creates a Scanner with temp ARP and lease files for testing.
+func testScanner(t *testing.T) *Scanner {
+	t.Helper()
+	dir := t.TempDir()
+
+	arpFile := filepath.Join(dir, "arp")
+	arpData := `IP address       HW type     Flags       HW address            Mask     Device
+192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1
+192.168.1.101    0x1         0x2         aa:bb:cc:dd:ee:02     *        eth1
+192.168.1.102    0x1         0x2         aa:bb:cc:dd:ee:03     *        eth1
+192.168.1.103    0x1         0x2         aa:bb:cc:dd:ee:04     *        eth1
+192.168.1.104    0x1         0x2         aa:bb:cc:dd:ee:05     *        eth1
+192.168.1.105    0x1         0x2         aa:bb:cc:dd:ee:06     *        eth1
+`
+	os.WriteFile(arpFile, []byte(arpData), 0644)
+
+	leaseFile := filepath.Join(dir, "leases")
+	leaseData := `1999999999 aa:bb:cc:dd:ee:01 192.168.1.100 laptop 01:aa:bb:cc:dd:ee:01
+1999999999 aa:bb:cc:dd:ee:02 192.168.1.101 phone 01:aa:bb:cc:dd:ee:02
+1999999999 aa:bb:cc:dd:ee:03 192.168.1.102 tablet 01:aa:bb:cc:dd:ee:03
+1999999999 aa:bb:cc:dd:ee:04 192.168.1.103 smart-tv 01:aa:bb:cc:dd:ee:04
+1999999999 aa:bb:cc:dd:ee:05 192.168.1.104 gaming-pc 01:aa:bb:cc:dd:ee:05
+1999999999 aa:bb:cc:dd:ee:06 192.168.1.105 iot-hub 01:aa:bb:cc:dd:ee:06
+`
+	os.WriteFile(leaseFile, []byte(leaseData), 0644)
+
+	s := NewScanner(leaseFile)
+	s.SetARPFile(arpFile)
+	return s
+}
+
+func TestScanner_ScanFindsDevices(t *testing.T) {
+	s := testScanner(t)
 	if err := s.Scan(); err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
 
 	devices := s.Devices()
-	if len(devices) < 5 {
-		t.Errorf("dev-mode scan returned %d devices, want >= 5", len(devices))
+	if len(devices) != 6 {
+		t.Errorf("scan returned %d devices, want 6", len(devices))
 	}
 
 	// All should be online (from ARP).
@@ -125,7 +158,7 @@ func TestScanner_DevMode(t *testing.T) {
 }
 
 func TestScanner_MergesARPAndDHCP(t *testing.T) {
-	s := NewScanner(true, "")
+	s := testScanner(t)
 	if err := s.Scan(); err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -145,7 +178,7 @@ func TestScanner_MergesARPAndDHCP(t *testing.T) {
 }
 
 func TestScanner_SetDeviceName(t *testing.T) {
-	s := NewScanner(true, "")
+	s := testScanner(t)
 	s.Scan()
 
 	s.SetDeviceName("aa:bb:cc:dd:ee:01", "My Laptop")
@@ -191,12 +224,12 @@ func TestLookupOUI_DashFormat(t *testing.T) {
 	}
 }
 
-func TestScanner_DevMode_SetsManufacturer(t *testing.T) {
-	s := NewScanner(true, "")
+func TestScanner_SetsManufacturer(t *testing.T) {
+	s := testScanner(t)
 	if err := s.Scan(); err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
-	// Dev-mode synthetic devices use aa:bb:cc MACs which won't have OUI entries,
+	// Test MACs use aa:bb:cc which won't have OUI entries,
 	// but the Manufacturer field should be populated (even if empty).
 	devices := s.Devices()
 	for _, d := range devices {
@@ -206,7 +239,7 @@ func TestScanner_DevMode_SetsManufacturer(t *testing.T) {
 }
 
 func TestScanner_LookupByIP(t *testing.T) {
-	s := NewScanner(true, "")
+	s := testScanner(t)
 	s.Scan()
 	s.SetDeviceName("aa:bb:cc:dd:ee:01", "My Laptop")
 
@@ -223,11 +256,31 @@ func TestScanner_LookupByIP(t *testing.T) {
 }
 
 func TestScanner_LookupByIP_NotFound(t *testing.T) {
-	s := NewScanner(true, "")
+	s := testScanner(t)
 	s.Scan()
 
 	_, _, ok := s.LookupByIP("10.0.0.99")
 	if ok {
 		t.Error("LookupByIP should not find unknown IP")
+	}
+}
+
+func TestScanner_NoLeaseFile(t *testing.T) {
+	dir := t.TempDir()
+	arpFile := filepath.Join(dir, "arp")
+	arpData := `IP address       HW type     Flags       HW address            Mask     Device
+192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1
+`
+	os.WriteFile(arpFile, []byte(arpData), 0644)
+
+	s := NewScanner(filepath.Join(dir, "nonexistent-leases"))
+	s.SetARPFile(arpFile)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	devices := s.Devices()
+	if len(devices) != 1 {
+		t.Errorf("expected 1 device, got %d", len(devices))
 	}
 }

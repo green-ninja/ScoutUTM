@@ -20,6 +20,15 @@ func (e ValidationError) Error() string {
 var hostnameRe = regexp.MustCompile(`^[a-zA-Z]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
 var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 var tagSanitizeRe = regexp.MustCompile(`[^a-z0-9_]`)
+var zoneNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,31}$`)
+var ifaceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,14}$`)
+var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_ -]{0,63}$`)
+var macRe = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
+var rulesetNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+var validProtos = map[string]bool{"tcp": true, "udp": true, "icmp": true, "": true}
+var validActions = map[string]bool{"accept": true, "drop": true, "reject": true}
+var validPortForwardProtos = map[string]bool{"tcp": true, "udp": true}
 
 // Validate checks a Config for semantic errors and returns all violations.
 func Validate(cfg *Config) []ValidationError {
@@ -39,6 +48,11 @@ func Validate(cfg *Config) []ValidationError {
 	if cfg.System.Timezone == "" {
 		errs = append(errs, ValidationError{"system.timezone", "must not be empty"})
 	}
+	for i, ntp := range cfg.System.NTPServers {
+		if net.ParseIP(ntp) == nil && !domainRe.MatchString(ntp) {
+			errs = append(errs, ValidationError{fmt.Sprintf("system.ntp_servers[%d]", i), fmt.Sprintf("must be a valid IP address or domain name, got %q", ntp)})
+		}
+	}
 
 	// Network — unique zone names + valid policies.
 	zoneNames := make(map[string]bool)
@@ -47,6 +61,9 @@ func Validate(cfg *Config) []ValidationError {
 		if z.Name == "" {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].name", i), "must not be empty"})
 			continue
+		}
+		if !zoneNameRe.MatchString(z.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].name", i), "must start with a letter and contain only letters, digits, and underscores (max 32 chars)"})
 		}
 		if zoneNames[z.Name] {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].name", i), fmt.Sprintf("duplicate zone name %q", z.Name)})
@@ -64,10 +81,12 @@ func Validate(cfg *Config) []ValidationError {
 		}
 	}
 
-	// Interfaces must reference valid zones.
+	// Interfaces must reference valid zones and have valid names.
 	for i, iface := range cfg.Network.Interfaces {
 		if iface.Name == "" {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.interfaces[%d].name", i), "must not be empty"})
+		} else if !ifaceNameRe.MatchString(iface.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.interfaces[%d].name", i), "must contain only letters, digits, dots, hyphens, and underscores (max 15 chars)"})
 		}
 		if iface.Zone != "" && !zoneNames[iface.Zone] {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.interfaces[%d].zone", i), fmt.Sprintf("references unknown zone %q", iface.Zone)})
@@ -103,6 +122,21 @@ func Validate(cfg *Config) []ValidationError {
 
 	// Firewall rules.
 	for i, rule := range cfg.Firewall.Rules {
+		if rule.Name != "" && !safeNameRe.MatchString(rule.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].name", i), "must contain only letters, digits, spaces, hyphens, and underscores (max 64 chars)"})
+		}
+		if !validProtos[rule.Proto] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].proto", i), "must be \"tcp\", \"udp\", \"icmp\", or empty"})
+		}
+		if !validActions[rule.Action] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].action", i), "must be \"accept\", \"drop\", or \"reject\""})
+		}
+		if rule.Src != "" && !zoneNames[rule.Src] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].src", i), fmt.Sprintf("references unknown zone %q", rule.Src)})
+		}
+		if rule.Dest != "" && !zoneNames[rule.Dest] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].dest", i), fmt.Sprintf("references unknown zone %q", rule.Dest)})
+		}
 		if rule.Port != 0 && (rule.Port < 1 || rule.Port > 65535) {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].port", i), "must be between 1 and 65535"})
 		}
@@ -110,6 +144,12 @@ func Validate(cfg *Config) []ValidationError {
 
 	// Port forwards.
 	for i, pf := range cfg.Firewall.PortForwards {
+		if pf.Name != "" && !safeNameRe.MatchString(pf.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].name", i), "must contain only letters, digits, spaces, hyphens, and underscores (max 64 chars)"})
+		}
+		if !validPortForwardProtos[pf.Proto] {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].proto", i), "must be \"tcp\" or \"udp\""})
+		}
 		if pf.SrcPort < 1 || pf.SrcPort > 65535 {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].src_port", i), "must be between 1 and 65535"})
 		}
@@ -157,6 +197,11 @@ func Validate(cfg *Config) []ValidationError {
 	for i, cidr := range cfg.IDS.HomeNet {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
 			errs = append(errs, ValidationError{fmt.Sprintf("ids.home_net[%d]", i), fmt.Sprintf("invalid CIDR %q", cidr)})
+		}
+	}
+	for i, rs := range cfg.IDS.Rulesets {
+		if !rulesetNameRe.MatchString(rs) {
+			errs = append(errs, ValidationError{fmt.Sprintf("ids.rulesets[%d]", i), fmt.Sprintf("invalid ruleset name %q (only letters, digits, hyphens, and underscores)", rs)})
 		}
 	}
 
@@ -279,6 +324,8 @@ func Validate(cfg *Config) []ValidationError {
 	for i, d := range cfg.Parental.Devices {
 		if d.MAC == "" {
 			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].mac", i), "must not be empty"})
+		} else if !macRe.MatchString(d.MAC) {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].mac", i), fmt.Sprintf("invalid MAC address format %q (expected XX:XX:XX:XX:XX:XX)", d.MAC)})
 		}
 		if d.ProfileID != "" && !profileIDs[d.ProfileID] {
 			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].profile_id", i), fmt.Sprintf("references unknown profile %q", d.ProfileID)})

@@ -64,15 +64,3 @@ func parseLeases(scanner *bufio.Scanner) ([]dhcpLease, error) {
 
 	return leases, scanner.Err()
 }
-
-// syntheticDHCPLeases returns dev-mode test data matching syntheticARPEntries.
-func syntheticDHCPLeases() []dhcpLease {
-	return []dhcpLease{
-		{Expiry: 1999999999, MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.1.100", Hostname: "laptop"},
-		{Expiry: 1999999999, MAC: "aa:bb:cc:dd:ee:02", IP: "192.168.1.101", Hostname: "phone"},
-		{Expiry: 1999999999, MAC: "aa:bb:cc:dd:ee:03", IP: "192.168.1.102", Hostname: "tablet"},
-		{Expiry: 1999999999, MAC: "aa:bb:cc:dd:ee:04", IP: "192.168.1.103", Hostname: "smart-tv"},
-		{Expiry: 1999999999, MAC: "aa:bb:cc:dd:ee:05", IP: "192.168.1.104", Hostname: "gaming-pc"},
-		{Expiry: 1999999999, MAC: "aa:bb:cc:dd:ee:06", IP: "192.168.1.105", Hostname: "iot-hub"},
-	}
-}
