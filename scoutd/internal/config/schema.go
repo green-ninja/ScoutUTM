@@ -237,8 +237,22 @@ func DefaultConfig() *Config {
 			Suppressed: []int{},
 		},
 		Parental: ParentalConfig{
-			Profiles: []ParentalProfile{},
-			Devices:  []ParentalDevice{},
+			Profiles: []ParentalProfile{
+				{
+					ID:              "default-kids",
+					Name:            "Kids",
+					BlockCategories: []string{"adult", "gambling", "gaming", "social_media", "streaming"},
+					SafeSearch:      true,
+					YoutubeRestricted: true,
+					Schedule: Schedule{
+						Enabled:   false,
+						StartTime: "",
+						EndTime:   "",
+						Days:      []string{},
+					},
+				},
+			},
+			Devices: []ParentalDevice{},
 		},
 		Update: UpdateConfig{
 			AutoCheck:   true,

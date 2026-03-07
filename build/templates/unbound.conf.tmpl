@@ -19,9 +19,17 @@ server:
 
     # Query logging
 {{- if .QueryLogging}}
-    log-queries: yes
+    log-queries: no
+    log-replies: yes
 {{- else}}
     log-queries: no
+    log-replies: no
+{{- end}}
+
+{{- if .HasRPZ}}
+
+    # Module config — respip required for RPZ
+    module-config: "respip validator iterator"
 {{- end}}
 
     # Hardening

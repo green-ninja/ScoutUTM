@@ -148,7 +148,7 @@ touch /var/lib/scout/logs/dns-query.log
 chown unbound:unbound /var/lib/scout/logs/dns-query.log 2>/dev/null || true
 # Create stub RPZ blocklist zone files (real lists are fetched by scheduler in production).
 mkdir -p /var/lib/scout/blocklists
-for zone in rpz-malware rpz-phishing rpz-ads; do
+for zone in rpz-malware rpz-phishing rpz-ads rpz-parental-adult rpz-parental-gambling rpz-parental-gaming rpz-parental-social_media rpz-parental-streaming; do
   cat > "/var/lib/scout/blocklists/${zone}.zone" << RPZEOF
 \$SOA 0 0 IN SOA localhost. root.localhost. 1 86400 7200 2592000 86400
 \$NS 0 0 IN NS localhost.

@@ -20,18 +20,31 @@ var ReloadOrder = []string{Nftables, Dnsmasq, Unbound, Suricata, WireGuard, Chro
 
 // Manager controls system daemons via OpenRC.
 type Manager struct {
-	devMode bool
+	stubAll      bool   // Stub all reloads (unit tests).
+	stubNftables bool   // Stub only nftables (Vagrant VM — SSH safety).
 }
 
-// NewManager creates a service manager.
-func NewManager(devMode bool) *Manager {
-	return &Manager{devMode: devMode}
+// NewManager creates a service manager. When stubAll is true, all daemon
+// reloads are no-ops (for unit tests without real daemons).
+func NewManager(stubAll bool) *Manager {
+	return &Manager{stubAll: stubAll}
 }
 
-// ReloadDaemon reloads a single daemon. In dev-mode, it only logs.
+// NewVMManager creates a service manager for the Vagrant VM. Only nftables
+// reloads are stubbed (to protect SSH access). All other daemons reload
+// normally so the VM behaves like production.
+func NewVMManager() *Manager {
+	return &Manager{stubNftables: true}
+}
+
+// ReloadDaemon reloads a single daemon.
 func (m *Manager) ReloadDaemon(name string) error {
-	if m.devMode {
+	if m.stubAll {
 		log.Printf("[dev-mode] would reload daemon: %s", name)
+		return nil
+	}
+	if m.stubNftables && name == Nftables {
+		log.Printf("[dev-mode] skipping nftables reload (SSH safety)")
 		return nil
 	}
 	return reloadDaemon(name)
@@ -58,7 +71,7 @@ func (m *Manager) ReloadDaemons(daemons []string) error {
 
 // SuricataUpdate runs suricata-update to fetch new rule signatures.
 func (m *Manager) SuricataUpdate() error {
-	if m.devMode {
+	if m.stubAll {
 		log.Printf("[dev-mode] would run suricata-update")
 		return nil
 	}
@@ -66,13 +79,14 @@ func (m *Manager) SuricataUpdate() error {
 }
 
 // HealthCheck verifies that reloaded daemons are running correctly.
-// In dev-mode, always passes. In production, checks each daemon's status.
 func (m *Manager) HealthCheck(daemons []string) error {
-	if m.devMode {
-		log.Printf("[dev-mode] would health-check daemons: %v", daemons)
+	if m.stubAll {
 		return nil
 	}
 	for _, name := range daemons {
+		if m.stubNftables && name == Nftables {
+			continue
+		}
 		if err := checkDaemon(name); err != nil {
 			return fmt.Errorf("health check failed for %s: %w", name, err)
 		}

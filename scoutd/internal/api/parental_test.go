@@ -17,7 +17,7 @@ func TestParental_CreateProfile(t *testing.T) {
 	token := loginAndGetToken(t, srv, "testpassword")
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"name":              "Kids",
+		"name":              "Teens",
 		"block_categories":  []string{"adult", "gaming"},
 		"safe_search":       true,
 		"youtube_restricted": true,
@@ -35,8 +35,8 @@ func TestParental_CreateProfile(t *testing.T) {
 	var profile config.ParentalProfile
 	json.Unmarshal(w.Body.Bytes(), &profile)
 
-	if profile.Name != "Kids" {
-		t.Errorf("profile name = %q, want Kids", profile.Name)
+	if profile.Name != "Teens" {
+		t.Errorf("profile name = %q, want Teens", profile.Name)
 	}
 	if profile.ID == "" {
 		t.Error("profile ID is empty")
@@ -54,7 +54,7 @@ func TestParental_CreateProfile_DuplicateName(t *testing.T) {
 	router := srv.Router()
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"name":             "Kids",
+		"name":             "Teens",
 		"block_categories": []string{},
 	})
 
@@ -69,7 +69,7 @@ func TestParental_CreateProfile_DuplicateName(t *testing.T) {
 
 	// Create duplicate.
 	body, _ = json.Marshal(map[string]interface{}{
-		"name":             "Kids",
+		"name":             "Teens",
 		"block_categories": []string{},
 	})
 	req = httptest.NewRequest("POST", "/api/v1/parental/profiles", bytes.NewReader(body))
@@ -90,7 +90,7 @@ func TestParental_DeleteCascade(t *testing.T) {
 
 	// Create profile.
 	body, _ := json.Marshal(map[string]interface{}{
-		"name":             "Kids",
+		"name":             "Teens",
 		"block_categories": []string{"adult"},
 	})
 	req := httptest.NewRequest("POST", "/api/v1/parental/profiles", bytes.NewReader(body))
@@ -140,7 +140,7 @@ func TestParental_AssignDevice(t *testing.T) {
 
 	// Create profile.
 	body, _ := json.Marshal(map[string]interface{}{
-		"name":             "Kids",
+		"name":             "Teens",
 		"block_categories": []string{},
 	})
 	req := httptest.NewRequest("POST", "/api/v1/parental/profiles", bytes.NewReader(body))

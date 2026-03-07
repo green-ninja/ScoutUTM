@@ -157,8 +157,14 @@ func main() {
 		log.Printf("warning: initial template render: %v", err)
 	}
 
-	// Service manager.
-	svcMgr := service.NewManager(devMode)
+	// Service manager. In dev mode (Vagrant VM), only nftables reloads are
+	// stubbed (SSH safety). All other daemons reload normally.
+	var svcMgr *service.Manager
+	if devMode {
+		svcMgr = service.NewVMManager()
+	} else {
+		svcMgr = service.NewManager(false)
+	}
 
 	// EVE alert reader.
 	eveReader := ids.NewReader(

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -92,7 +93,8 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
-	mac := strings.ToLower(chi.URLParam(r, "mac"))
+	raw, _ := url.PathUnescape(chi.URLParam(r, "mac"))
+	mac := strings.ToLower(raw)
 	overlays := s.buildOverlayMap()
 
 	for _, d := range s.Scanner.Devices() {
@@ -111,7 +113,8 @@ type updateDeviceRequest struct {
 }
 
 func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
-	mac := strings.ToLower(chi.URLParam(r, "mac"))
+	raw, _ := url.PathUnescape(chi.URLParam(r, "mac"))
+	mac := strings.ToLower(raw)
 
 	var req updateDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

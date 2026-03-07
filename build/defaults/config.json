@@ -54,7 +54,16 @@
     "suppressed": []
   },
   "parental": {
-    "profiles": [],
+    "profiles": [
+      {
+        "id": "default-kids",
+        "name": "Kids",
+        "block_categories": ["adult", "gambling", "gaming", "social_media", "streaming"],
+        "safe_search": true,
+        "youtube_restricted": true,
+        "schedule": {"enabled": false, "start_time": "", "end_time": "", "days": []}
+      }
+    ],
     "devices": []
   },
   "update": {

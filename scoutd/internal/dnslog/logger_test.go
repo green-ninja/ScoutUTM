@@ -18,7 +18,7 @@ func (m *mockLookup) LookupByIP(ip string) (string, string, bool) {
 	return d.mac, d.name, true
 }
 
-func TestParseUnboundLine_ValidQuery(t *testing.T) {
+func TestParseUnboundLine_QueryOnly(t *testing.T) {
 	lookup := &mockLookup{
 		devices: map[string]struct{ mac, name string }{
 			"192.168.1.100": {mac: "aa:bb:cc:dd:ee:01", name: "laptop"},
@@ -26,7 +26,7 @@ func TestParseUnboundLine_ValidQuery(t *testing.T) {
 	}
 	logger := NewLogger("", lookup)
 
-	// Unix epoch 1705314645 = 2024-01-15 10:30:45 UTC
+	// Query-only line (log-queries format, no response code).
 	line := `[1705314645] unbound[1234:0] info: 192.168.1.100 www.google.com. A IN`
 	entry, ok := logger.ParseUnboundLine(line)
 
@@ -50,6 +50,54 @@ func TestParseUnboundLine_ValidQuery(t *testing.T) {
 	}
 	if entry.Timestamp != "2024-01-15 10:30:45" {
 		t.Errorf("timestamp = %q, want 2024-01-15 10:30:45", entry.Timestamp)
+	}
+}
+
+func TestParseUnboundLine_ReplyAllowed(t *testing.T) {
+	logger := NewLogger("", nil)
+
+	line := `[1705314645] unbound[1234:0] info: 192.168.1.100 www.google.com. A IN NOERROR 0.012345 1 55`
+	entry, ok := logger.ParseUnboundLine(line)
+
+	if !ok {
+		t.Fatal("expected reply line to be parsed")
+	}
+	if entry.Domain != "www.google.com" {
+		t.Errorf("domain = %q, want www.google.com", entry.Domain)
+	}
+	if entry.Action != "allow" {
+		t.Errorf("action = %q, want allow", entry.Action)
+	}
+}
+
+func TestParseUnboundLine_ReplyBlocked(t *testing.T) {
+	logger := NewLogger("", nil)
+
+	line := `[1705314645] unbound[1234:0] info: 192.168.1.200 pornhub.com. A IN NXDOMAIN 0.000000 0 40`
+	entry, ok := logger.ParseUnboundLine(line)
+
+	if !ok {
+		t.Fatal("expected reply line to be parsed")
+	}
+	if entry.Domain != "pornhub.com" {
+		t.Errorf("domain = %q, want pornhub.com", entry.Domain)
+	}
+	if entry.Action != "block" {
+		t.Errorf("action = %q, want block", entry.Action)
+	}
+}
+
+func TestParseUnboundLine_ReplyRefused(t *testing.T) {
+	logger := NewLogger("", nil)
+
+	line := `[1705314645] unbound[1234:0] info: 192.168.1.200 example.com. A IN REFUSED 0.000000 0 40`
+	entry, ok := logger.ParseUnboundLine(line)
+
+	if !ok {
+		t.Fatal("expected reply line to be parsed")
+	}
+	if entry.Action != "block" {
+		t.Errorf("action = %q, want block", entry.Action)
 	}
 }
 

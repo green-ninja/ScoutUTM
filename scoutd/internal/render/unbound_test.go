@@ -46,14 +46,19 @@ func TestRenderUnbound_Default(t *testing.T) {
 		t.Error("expected forward-addr for 9.9.9.9")
 	}
 
-	// Query logging on by default.
-	if !strings.Contains(content, "log-queries: yes") {
-		t.Error("expected log-queries: yes")
+	// Reply logging on by default.
+	if !strings.Contains(content, "log-replies: yes") {
+		t.Error("expected log-replies: yes")
 	}
 
 	// No TLS by default.
 	if strings.Contains(content, "forward-tls-upstream") {
 		t.Error("unexpected forward-tls-upstream in default config")
+	}
+
+	// Default config has malware+phishing RPZ, so respip module is needed.
+	if !strings.Contains(content, `module-config: "respip validator iterator"`) {
+		t.Error("expected module-config with respip for RPZ")
 	}
 }
 
@@ -263,6 +268,10 @@ func TestRenderUnbound_ParentalRPZ(t *testing.T) {
 	if !strings.Contains(content, `tags: "`) {
 		t.Error("expected tags directive on parental RPZ zones")
 	}
+	// RPZ requires respip module.
+	if !strings.Contains(content, `module-config: "respip validator iterator"`) {
+		t.Error("expected module-config with respip for RPZ")
+	}
 }
 
 func TestRenderUnbound_SafeSearch(t *testing.T) {
@@ -373,5 +382,8 @@ func TestRenderUnbound_NoBlocklists(t *testing.T) {
 
 	if strings.Contains(content, "rpz-") {
 		t.Error("unexpected RPZ zone when all blocklists disabled")
+	}
+	if strings.Contains(content, "module-config") {
+		t.Error("unexpected module-config without RPZ zones")
 	}
 }

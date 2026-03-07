@@ -94,3 +94,21 @@ func TestDevices_UpdateName(t *testing.T) {
 		t.Errorf("device name = %q, want 'My Laptop'", device.Name)
 	}
 }
+
+func TestDevices_UpdateName_EncodedMAC(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+	token := loginAndGetToken(t, srv, "testpassword")
+
+	// Browser sends percent-encoded colons via encodeURIComponent.
+	body, _ := json.Marshal(map[string]string{"name": "My Laptop"})
+	req := httptest.NewRequest("PUT", "/api/v1/devices/aa%3Abb%3Acc%3Add%3Aee%3A01", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("update device with encoded MAC: status = %d, body = %s, want 200", w.Code, w.Body.String())
+	}
+}

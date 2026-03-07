@@ -2,19 +2,22 @@ package service
 
 import "testing"
 
-func TestReloadDaemon_DevMode(t *testing.T) {
+func TestReloadDaemon_StubAll(t *testing.T) {
 	m := NewManager(true)
-	// Dev mode should not execute anything — just log.
+	// StubAll mode should not execute anything — just log.
 	if err := m.ReloadDaemon(Nftables); err != nil {
-		t.Errorf("ReloadDaemon in dev mode: %v", err)
+		t.Errorf("ReloadDaemon: %v", err)
+	}
+	if err := m.ReloadDaemon(Unbound); err != nil {
+		t.Errorf("ReloadDaemon: %v", err)
 	}
 }
 
-func TestReloadDaemons_DevMode(t *testing.T) {
+func TestReloadDaemons_StubAll(t *testing.T) {
 	m := NewManager(true)
 	daemons := []string{Chrony, Nftables, Dnsmasq}
 	if err := m.ReloadDaemons(daemons); err != nil {
-		t.Errorf("ReloadDaemons in dev mode: %v", err)
+		t.Errorf("ReloadDaemons: %v", err)
 	}
 }
 
@@ -32,7 +35,6 @@ func TestReloadDaemons_Ordering(t *testing.T) {
 }
 
 func TestReloadDaemons_SubsetOrdering(t *testing.T) {
-	// Verify only requested daemons are reloaded, in correct order.
 	m := NewManager(true)
 	// Request chrony before nftables — should still reload nftables first.
 	if err := m.ReloadDaemons([]string{Chrony, Nftables}); err != nil {
@@ -40,10 +42,26 @@ func TestReloadDaemons_SubsetOrdering(t *testing.T) {
 	}
 }
 
-func TestHealthCheck_DevMode(t *testing.T) {
+func TestHealthCheck_StubAll(t *testing.T) {
 	m := NewManager(true)
-	// Dev mode health check should always pass.
+	// StubAll health check should always pass.
 	if err := m.HealthCheck([]string{Nftables, Dnsmasq, Chrony}); err != nil {
-		t.Errorf("HealthCheck in dev mode: %v", err)
+		t.Errorf("HealthCheck: %v", err)
+	}
+}
+
+func TestVMManager_NftablesStubbed(t *testing.T) {
+	m := NewVMManager()
+	// VM manager should stub nftables.
+	if err := m.ReloadDaemon(Nftables); err != nil {
+		t.Errorf("ReloadDaemon nftables: %v", err)
+	}
+}
+
+func TestVMManager_HealthCheck_NftablesSkipped(t *testing.T) {
+	m := NewVMManager()
+	// Nftables health check should be skipped.
+	if err := m.HealthCheck([]string{Nftables}); err != nil {
+		t.Errorf("HealthCheck nftables: %v", err)
 	}
 }

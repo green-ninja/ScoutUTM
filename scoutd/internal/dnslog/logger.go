@@ -89,26 +89,47 @@ func (l *Logger) AddEntry(e Entry) {
 	}
 }
 
-// Unbound logfile format (unix epoch):
+// Unbound reply log format (log-replies: yes):
+//   [1772738547] unbound[3220:0] info: 192.168.1.162 www.google.com. A IN NOERROR 0.012345 1 55
+// The response code (NOERROR, NXDOMAIN, SERVFAIL, etc.) appears after the class field.
+//
+// Unbound query log format (log-queries: yes):
 //   [1772738547] unbound[3220:0] info: 192.168.1.162 example.com. A IN
+// Query lines have no response code — only 4 fields after "info:".
+var unboundReplyRe = regexp.MustCompile(
+	`\[(\d+)\].*info:\s+(\S+)\s+(\S+)\s+(\S+)\s+IN\s+(\S+)`,
+)
+
+// Fallback for query-only lines (no reply code).
 var unboundQueryRe = regexp.MustCompile(
-	`\[(\d+)\].*info:\s+(\S+)\s+(\S+)\s+(\S+)`,
+	`\[(\d+)\].*info:\s+(\S+)\s+(\S+)\s+(\S+)\s+IN\s*$`,
 )
 
 // ParseUnboundLine parses a single Unbound log line into an Entry.
-// Returns ok=false if the line is not a query log entry.
+// Only parses reply lines (which include the response code like NOERROR,
+// NXDOMAIN). Query-only lines are skipped to avoid duplicates when both
+// log-queries and log-replies are enabled. Falls back to query-only
+// format if log-replies is not enabled.
 func (l *Logger) ParseUnboundLine(line string) (Entry, bool) {
-	m := unboundQueryRe.FindStringSubmatch(line)
-	if m == nil {
-		return Entry{}, false
+	// Try reply format first (has response code after IN).
+	if m := unboundReplyRe.FindStringSubmatch(line); m != nil {
+		return l.buildEntry(m[1], m[2], m[3], m[5]), true
 	}
 
-	epoch, _ := strconv.ParseInt(m[1], 10, 64)
-	timestamp := time.Unix(epoch, 0).UTC().Format("2006-01-02 15:04:05")
-	clientIP := m[2]
-	domain := strings.TrimSuffix(m[3], ".")
+	// Fall back to query-only format (no response code).
+	if m := unboundQueryRe.FindStringSubmatch(line); m != nil {
+		return l.buildEntry(m[1], m[2], m[3], ""), true
+	}
 
-	// Look up device info.
+	return Entry{}, false
+}
+
+// buildEntry creates a log entry from parsed fields.
+func (l *Logger) buildEntry(epochStr, clientIP, domain, rcode string) Entry {
+	epoch, _ := strconv.ParseInt(epochStr, 10, 64)
+	timestamp := time.Unix(epoch, 0).UTC().Format("2006-01-02 15:04:05")
+	domain = strings.TrimSuffix(domain, ".")
+
 	var deviceMAC, deviceName string
 	if l.lookup != nil {
 		if mac, name, ok := l.lookup.LookupByIP(clientIP); ok {
@@ -118,7 +139,7 @@ func (l *Logger) ParseUnboundLine(line string) (Entry, bool) {
 	}
 
 	action := "allow"
-	if strings.Contains(line, "nxdomain") || strings.Contains(line, "NXDOMAIN") {
+	if rcode == "NXDOMAIN" || rcode == "REFUSED" {
 		action = "block"
 	}
 
@@ -129,7 +150,7 @@ func (l *Logger) ParseUnboundLine(line string) (Entry, bool) {
 		DeviceName: deviceName,
 		Domain:     domain,
 		Action:     action,
-	}, true
+	}
 }
 
 // RotateLog rotates the DNS query log file if it exceeds maxSize bytes.

@@ -15,8 +15,7 @@ func reloadDaemon(name string) error {
 	case Chrony:
 		return runCmd("rc-service", "chronyd", "restart")
 	case Unbound:
-		// Stub — will be implemented in Month 3.
-		return runCmd("unbound-control", "reload")
+		return runCmd("rc-service", "unbound", "restart")
 	case Suricata:
 		// Stub — will be implemented in Month 5.
 		return runCmd("suricatasc", "-c", "reload-rules")

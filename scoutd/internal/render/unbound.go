@@ -1,10 +1,13 @@
 package render
 
 import (
+	"log"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/scoututm/scoutd/internal/blocklist"
 	"github.com/scoututm/scoutd/internal/config"
 )
 
@@ -17,6 +20,7 @@ type UnboundData struct {
 	UseTLS       bool
 	DNSSEC       bool
 	QueryLogging bool
+	HasRPZ       bool // True when any RPZ zones exist (requires respip module).
 	RPZZones     []UnboundRPZZone
 	CustomBlock  []string
 	CustomAllow  []string
@@ -64,13 +68,53 @@ type UnboundSafeSearch struct {
 // RenderUnbound renders unbound.conf from the config.
 func (e *Engine) RenderUnbound(cfg *config.Config) error {
 	data := buildUnboundData(cfg, nil)
+	e.ensureParentalZoneFiles(cfg)
 	return e.renderTemplate("unbound.conf.tmpl", e.outputPath("unbound/unbound.conf"), data)
 }
 
 // RenderUnboundWithSchedule renders unbound.conf with schedule-blocked device IPs.
 func (e *Engine) RenderUnboundWithSchedule(cfg *config.Config, blockedIPs []string) error {
 	data := buildUnboundData(cfg, blockedIPs)
+	e.ensureParentalZoneFiles(cfg)
 	return e.renderTemplate("unbound.conf.tmpl", e.outputPath("unbound/unbound.conf"), data)
+}
+
+// ensureParentalZoneFiles writes RPZ zone files for any parental categories
+// referenced in the config. Without these files, Unbound cannot load the RPZ
+// zones and blocking will silently fail. Always writes (not just ensures) so
+// that empty stubs from provisioning are replaced with real domain lists.
+func (e *Engine) ensureParentalZoneFiles(cfg *config.Config) {
+	cats := parentalCategories(cfg)
+	if len(cats) == 0 {
+		return
+	}
+	// The Unbound template hardcodes /var/lib/scout/blocklists/ as the
+	// absolute path. Zone files must go there in production and in the
+	// Vagrant VM. Only use a local path when outputDir is not the real
+	// system path (i.e., unit tests with a temp dir).
+	dir := "/var/lib/scout/blocklists"
+	if _, err := os.Stat("/var/lib/scout"); os.IsNotExist(err) {
+		dir = e.outputPath("scout/blocklists")
+	}
+	if err := blocklist.WriteParentalZones(cats, dir); err != nil {
+		log.Printf("warning: failed to write parental zone files: %v", err)
+	}
+}
+
+// parentalCategories returns the deduplicated set of blocked categories
+// across all parental profiles.
+func parentalCategories(cfg *config.Config) []string {
+	seen := make(map[string]bool)
+	for _, p := range cfg.Parental.Profiles {
+		for _, cat := range p.BlockCategories {
+			seen[cat] = true
+		}
+	}
+	cats := make([]string, 0, len(seen))
+	for cat := range seen {
+		cats = append(cats, cat)
+	}
+	return cats
 }
 
 // buildUnboundData constructs the template data from config.
@@ -123,6 +167,8 @@ func buildUnboundData(cfg *config.Config, blockedIPs []string) UnboundData {
 	}
 
 	buildParentalTags(cfg, &data)
+
+	data.HasRPZ = len(data.RPZZones) > 0 || len(data.ParentalRPZZones) > 0
 
 	return data
 }
