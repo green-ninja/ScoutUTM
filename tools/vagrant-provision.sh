@@ -50,6 +50,7 @@ apk add \
 mkdir -p /etc/scout/tls
 mkdir -p /var/lib/scout
 mkdir -p /var/lib/scout/logs
+mkdir -p /var/lib/scout/suricata
 mkdir -p /var/log/scout
 mkdir -p /usr/share/scoutd/templates
 

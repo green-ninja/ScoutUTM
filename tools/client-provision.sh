@@ -78,6 +78,19 @@ check "Internet access through ScoutUTM" curl -sf --max-time 10 http://example.c
 check "ScoutUTM web UI (HTTPS)" curl -sfk --max-time 5 https://192.168.1.1/api/v1/health
 
 echo ""
+
+# ── IDS Test Trigger ──
+# Fetch the testmynids.org test page so Suricata generates an alert on first boot.
+# The response contains "uid=0(root)" which triggers ET Open SID 2100498.
+# Traffic flows through ScoutUTM's eth1 where Suricata is monitoring.
+if [ "$FAIL" -eq 0 ]; then
+  echo "Triggering IDS test alert (testmynids.org)..."
+  curl -sf --max-time 10 http://testmynids.org/uid/index.html >/dev/null 2>&1 \
+    && echo "  OK: IDS test traffic sent" \
+    || echo "  WARNING: testmynids.org fetch failed (IDS alert may not appear)"
+fi
+
+echo ""
 echo "=== Client Provisioning Complete ==="
 echo "  Checks passed: $PASS"
 echo "  Checks failed: $FAIL"

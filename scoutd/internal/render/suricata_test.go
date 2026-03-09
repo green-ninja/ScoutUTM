@@ -155,6 +155,8 @@ func TestRuleFilesForRulesets(t *testing.T) {
 		{"empty", nil, []string{"suricata.rules"}},
 		{"mixed_known", []string{"et-open", "et-pro"}, []string{"suricata.rules", "et-pro.rules"}},
 		{"mixed_unknown_dropped", []string{"et-open", "local"}, []string{"suricata.rules"}},
+		{"abuse_ch_merged", []string{"et-open", "abuse-ch"}, []string{"suricata.rules"}},
+		{"abuse_ch_only", []string{"abuse-ch"}, []string{"suricata.rules"}},
 	}
 
 	for _, tt := range tests {

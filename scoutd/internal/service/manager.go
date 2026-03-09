@@ -69,16 +69,43 @@ func (m *Manager) ReloadDaemons(daemons []string) error {
 	return nil
 }
 
+// abuseCHSources are the suricata-update source names for abuse.ch feeds.
+// These are managed via enable-source/disable-source and merged into
+// suricata.rules alongside ET Open/Pro rules.
+var abuseCHSources = []string{
+	"sslbl/ssl-fp-blacklist",
+	"sslbl/ja3-fingerprints",
+}
+
 // SuricataUpdate runs suricata-update to fetch new IDS rule signatures.
 //
-// The --etopen flag explicitly selects the Emerging Threats Open ruleset
-// over HTTPS. suricata-update verifies checksums of downloaded archives.
+// The --etopen flag selects the Emerging Threats Open ruleset over HTTPS.
+// abuse.ch sources (SSLBL, JA3) are managed via suricata-update's
+// enable-source/disable-source mechanism.
+// suricata-update verifies checksums of downloaded archives.
 // The --disable-ssl-verify flag is intentionally never used.
-func (m *Manager) SuricataUpdate() error {
+func (m *Manager) SuricataUpdate(rulesets []string) error {
 	if m.stubAll {
-		log.Printf("[dev-mode] would run suricata-update")
+		log.Printf("[dev-mode] would run suricata-update (rulesets: %v)", rulesets)
 		return nil
 	}
+
+	// Sync abuse.ch sources based on config.
+	wantAbuseCH := false
+	for _, rs := range rulesets {
+		if rs == "abuse-ch" {
+			wantAbuseCH = true
+			break
+		}
+	}
+	for _, src := range abuseCHSources {
+		if wantAbuseCH {
+			_ = runCmd("suricata-update", "enable-source", src)
+		} else {
+			_ = runCmd("suricata-update", "disable-source", src)
+		}
+	}
+
 	return runCmd("suricata-update", "--etopen")
 }
 

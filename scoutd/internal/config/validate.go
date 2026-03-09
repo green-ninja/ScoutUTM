@@ -27,7 +27,7 @@ var macRe = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
 var timezoneRe = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*|UTC|GMT)$`)
 var languageRe = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 var rulesetNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
-var validRulesets = map[string]bool{"et-open": true, "et-pro": true}
+var validRulesets = map[string]bool{"et-open": true, "et-pro": true, "abuse-ch": true}
 var wgPubKeyRe = regexp.MustCompile(`^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=?$`)
 
 var validProtos = map[string]bool{"tcp": true, "udp": true, "icmp": true, "": true}
@@ -275,7 +275,7 @@ func Validate(cfg *Config) []ValidationError {
 	}
 	for i, rs := range cfg.IDS.Rulesets {
 		if !validRulesets[rs] {
-			errs = append(errs, ValidationError{fmt.Sprintf("ids.rulesets[%d]", i), fmt.Sprintf("unknown ruleset %q (supported: et-open, et-pro)", rs)})
+			errs = append(errs, ValidationError{fmt.Sprintf("ids.rulesets[%d]", i), fmt.Sprintf("unknown ruleset %q (supported: et-open, et-pro, abuse-ch)", rs)})
 		}
 	}
 

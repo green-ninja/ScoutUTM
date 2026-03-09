@@ -62,6 +62,8 @@ func (e *Engine) RenderSuricata(cfg *config.Config) error {
 // Unknown rulesets are silently ignored (defense-in-depth; validation
 // should reject them before they reach here).
 func ruleFilesForRulesets(rulesets []string) []string {
+	// abuse-ch rules are merged into suricata.rules by suricata-update
+	// (via enable-source), so they don't need a separate file entry.
 	mapping := map[string]string{
 		"et-open": "suricata.rules",
 		"et-pro":  "et-pro.rules",

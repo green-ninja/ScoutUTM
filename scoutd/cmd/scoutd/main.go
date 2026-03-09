@@ -200,7 +200,7 @@ func main() {
 		Name:  "suricata-update",
 		RunAt: "03:00",
 		Fn: func(ctx context.Context) error {
-			if err := svcMgr.SuricataUpdate(); err != nil {
+			if err := svcMgr.SuricataUpdate(store.Current().IDS.Rulesets); err != nil {
 				return err
 			}
 			return svcMgr.ReloadDaemons([]string{"suricata"})

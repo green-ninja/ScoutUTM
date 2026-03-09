@@ -226,7 +226,7 @@ func DefaultConfig() *Config {
 		IDS: IDSConfig{
 			Enabled:    true,
 			Mode:       "ids",
-			Rulesets:   []string{"et-open"},
+			Rulesets:   []string{"et-open", "abuse-ch"},
 			HomeNet:    []string{"192.168.1.0/24"},
 			Suppressed: []int{},
 		},

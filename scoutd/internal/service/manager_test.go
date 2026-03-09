@@ -69,7 +69,14 @@ func TestVMManager_HealthCheck_NftablesSkipped(t *testing.T) {
 func TestSuricataUpdate_StubAll(t *testing.T) {
 	m := NewManager(true)
 	// StubAll mode should not execute anything — just log.
-	if err := m.SuricataUpdate(); err != nil {
+	if err := m.SuricataUpdate([]string{"et-open"}); err != nil {
 		t.Errorf("SuricataUpdate: %v", err)
+	}
+}
+
+func TestSuricataUpdate_StubAll_WithAbuseCH(t *testing.T) {
+	m := NewManager(true)
+	if err := m.SuricataUpdate([]string{"et-open", "abuse-ch"}); err != nil {
+		t.Errorf("SuricataUpdate with abuse-ch: %v", err)
 	}
 }

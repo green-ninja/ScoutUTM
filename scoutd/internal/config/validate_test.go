@@ -620,6 +620,7 @@ func TestValidate_IDSRulesetName(t *testing.T) {
 	}{
 		{"valid_et_open", "et-open", false},
 		{"valid_et_pro", "et-pro", false},
+		{"valid_abuse_ch", "abuse-ch", false},
 		{"unknown_custom", "custom_rules", true},
 		{"path_traversal", "../../etc/passwd", true},
 		{"yaml_injection", "rules\n  - evil", true},
