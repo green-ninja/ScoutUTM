@@ -24,11 +24,35 @@ var zoneNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,31}$`)
 var ifaceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,14}$`)
 var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_ -]{0,63}$`)
 var macRe = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
+var timezoneRe = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*|UTC|GMT)$`)
+var languageRe = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 var rulesetNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+var validRulesets = map[string]bool{"et-open": true, "et-pro": true}
+var wgPubKeyRe = regexp.MustCompile(`^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=?$`)
 
 var validProtos = map[string]bool{"tcp": true, "udp": true, "icmp": true, "": true}
 var validActions = map[string]bool{"accept": true, "drop": true, "reject": true}
 var validPortForwardProtos = map[string]bool{"tcp": true, "udp": true}
+
+// Collection size limits to prevent resource exhaustion (CWE-770).
+const (
+	maxFirewallRules      = 500
+	maxPortForwards       = 100
+	maxZones              = 20
+	maxInterfaces         = 20
+	maxVLANs              = 50
+	maxDNSCustomBlock     = 1000
+	maxDNSCustomAllow     = 1000
+	maxDNSUpstream        = 10
+	maxNTPServers         = 10
+	maxIDSHomeNet         = 20
+	maxIDSSuppressed      = 500
+	maxIDSRulesets        = 10
+	maxParentalProfiles   = 20
+	maxParentalDevices    = 200
+	maxProfileNameLen     = 64
+	maxEndpointOverrideLen = 253
+)
 
 // Validate checks a Config for semantic errors and returns all violations.
 func Validate(cfg *Config) []ValidationError {
@@ -47,6 +71,14 @@ func Validate(cfg *Config) []ValidationError {
 	}
 	if cfg.System.Timezone == "" {
 		errs = append(errs, ValidationError{"system.timezone", "must not be empty"})
+	} else if !timezoneRe.MatchString(cfg.System.Timezone) {
+		errs = append(errs, ValidationError{"system.timezone", "must be in Area/Location format (e.g. America/New_York) or UTC"})
+	}
+	if cfg.System.Language != "" && !languageRe.MatchString(cfg.System.Language) {
+		errs = append(errs, ValidationError{"system.language", "must be a valid language code (e.g. en, de, fr-FR)"})
+	}
+	if len(cfg.System.NTPServers) > maxNTPServers {
+		errs = append(errs, ValidationError{"system.ntp_servers", fmt.Sprintf("too many NTP servers (max %d)", maxNTPServers)})
 	}
 	for i, ntp := range cfg.System.NTPServers {
 		if net.ParseIP(ntp) == nil && !domainRe.MatchString(ntp) {
@@ -55,6 +87,12 @@ func Validate(cfg *Config) []ValidationError {
 	}
 
 	// Network — unique zone names + valid policies.
+	if len(cfg.Network.Zones) > maxZones {
+		errs = append(errs, ValidationError{"network.zones", fmt.Sprintf("too many zones (max %d)", maxZones)})
+	}
+	if len(cfg.Network.Interfaces) > maxInterfaces {
+		errs = append(errs, ValidationError{"network.interfaces", fmt.Sprintf("too many interfaces (max %d)", maxInterfaces)})
+	}
 	zoneNames := make(map[string]bool)
 	validPolicies := map[string]bool{"accept": true, "drop": true, "reject": true}
 	for i, z := range cfg.Network.Zones {
@@ -91,6 +129,16 @@ func Validate(cfg *Config) []ValidationError {
 		if iface.Zone != "" && !zoneNames[iface.Zone] {
 			errs = append(errs, ValidationError{fmt.Sprintf("network.interfaces[%d].zone", i), fmt.Sprintf("references unknown zone %q", iface.Zone)})
 		}
+		// Validate IPv4Mode whitelist.
+		if iface.IPv4Mode != "" && iface.IPv4Mode != "static" && iface.IPv4Mode != "dhcp" {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.interfaces[%d].ipv4_mode", i), "must be \"static\", \"dhcp\", or empty"})
+		}
+		// Validate IPv4Address is valid CIDR when mode is static.
+		if iface.IPv4Mode == "static" && iface.IPv4Address != "" {
+			if _, _, err := net.ParseCIDR(iface.IPv4Address); err != nil {
+				errs = append(errs, ValidationError{fmt.Sprintf("network.interfaces[%d].ipv4_address", i), fmt.Sprintf("must be a valid CIDR (e.g. 192.168.1.1/24), got %q", iface.IPv4Address)})
+			}
+		}
 	}
 
 	// Build zone→interface map for forwarding validation.
@@ -121,6 +169,9 @@ func Validate(cfg *Config) []ValidationError {
 	}
 
 	// Firewall rules.
+	if len(cfg.Firewall.Rules) > maxFirewallRules {
+		errs = append(errs, ValidationError{"firewall.rules", fmt.Sprintf("too many rules (max %d)", maxFirewallRules)})
+	}
 	for i, rule := range cfg.Firewall.Rules {
 		if rule.Name != "" && !safeNameRe.MatchString(rule.Name) {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].name", i), "must contain only letters, digits, spaces, hyphens, and underscores (max 64 chars)"})
@@ -143,6 +194,9 @@ func Validate(cfg *Config) []ValidationError {
 	}
 
 	// Port forwards.
+	if len(cfg.Firewall.PortForwards) > maxPortForwards {
+		errs = append(errs, ValidationError{"firewall.port_forwards", fmt.Sprintf("too many port forwards (max %d)", maxPortForwards)})
+	}
 	for i, pf := range cfg.Firewall.PortForwards {
 		if pf.Name != "" && !safeNameRe.MatchString(pf.Name) {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].name", i), "must contain only letters, digits, spaces, hyphens, and underscores (max 64 chars)"})
@@ -156,12 +210,17 @@ func Validate(cfg *Config) []ValidationError {
 		if pf.DestPort < 1 || pf.DestPort > 65535 {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].dest_port", i), "must be between 1 and 65535"})
 		}
-		if pf.DestIP != "" && net.ParseIP(pf.DestIP) == nil {
+		if pf.DestIP == "" {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].dest_ip", i), "must not be empty"})
+		} else if net.ParseIP(pf.DestIP) == nil {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].dest_ip", i), "invalid IP address"})
 		}
 	}
 
 	// DNS upstreams.
+	if len(cfg.DNS.Upstream) > maxDNSUpstream {
+		errs = append(errs, ValidationError{"dns.upstream", fmt.Sprintf("too many upstream servers (max %d)", maxDNSUpstream)})
+	}
 	if len(cfg.DNS.Upstream) == 0 {
 		errs = append(errs, ValidationError{"dns.upstream", "must have at least one upstream server"})
 	}
@@ -171,12 +230,10 @@ func Validate(cfg *Config) []ValidationError {
 		}
 	}
 
-	// DNS: DoT and DoH are mutually exclusive.
-	if cfg.DNS.UseDOT && cfg.DNS.UseDOH {
-		errs = append(errs, ValidationError{"dns.use_dot", "use_dot and use_doh cannot both be enabled"})
-	}
-
 	// DNS: custom block domains.
+	if len(cfg.DNS.CustomBlock) > maxDNSCustomBlock {
+		errs = append(errs, ValidationError{"dns.custom_block", fmt.Sprintf("too many custom block entries (max %d)", maxDNSCustomBlock)})
+	}
 	for i, d := range cfg.DNS.CustomBlock {
 		if !domainRe.MatchString(d) {
 			errs = append(errs, ValidationError{fmt.Sprintf("dns.custom_block[%d]", i), fmt.Sprintf("invalid domain name %q", d)})
@@ -184,6 +241,9 @@ func Validate(cfg *Config) []ValidationError {
 	}
 
 	// DNS: custom allow domains.
+	if len(cfg.DNS.CustomAllow) > maxDNSCustomAllow {
+		errs = append(errs, ValidationError{"dns.custom_allow", fmt.Sprintf("too many custom allow entries (max %d)", maxDNSCustomAllow)})
+	}
 	for i, d := range cfg.DNS.CustomAllow {
 		if !domainRe.MatchString(d) {
 			errs = append(errs, ValidationError{fmt.Sprintf("dns.custom_allow[%d]", i), fmt.Sprintf("invalid domain name %q", d)})
@@ -194,18 +254,35 @@ func Validate(cfg *Config) []ValidationError {
 	if cfg.IDS.Mode != "ids" && cfg.IDS.Mode != "ips" {
 		errs = append(errs, ValidationError{"ids.mode", "must be \"ids\" or \"ips\""})
 	}
+	if len(cfg.IDS.HomeNet) > maxIDSHomeNet {
+		errs = append(errs, ValidationError{"ids.home_net", fmt.Sprintf("too many home_net entries (max %d)", maxIDSHomeNet)})
+	}
 	for i, cidr := range cfg.IDS.HomeNet {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
 			errs = append(errs, ValidationError{fmt.Sprintf("ids.home_net[%d]", i), fmt.Sprintf("invalid CIDR %q", cidr)})
 		}
 	}
+	if len(cfg.IDS.Suppressed) > maxIDSSuppressed {
+		errs = append(errs, ValidationError{"ids.suppressed", fmt.Sprintf("too many suppressed SIDs (max %d)", maxIDSSuppressed)})
+	}
+	for i, sid := range cfg.IDS.Suppressed {
+		if sid < 1 || sid > 99999999 {
+			errs = append(errs, ValidationError{fmt.Sprintf("ids.suppressed[%d]", i), "must be a positive integer (1-99999999)"})
+		}
+	}
+	if len(cfg.IDS.Rulesets) > maxIDSRulesets {
+		errs = append(errs, ValidationError{"ids.rulesets", fmt.Sprintf("too many rulesets (max %d)", maxIDSRulesets)})
+	}
 	for i, rs := range cfg.IDS.Rulesets {
-		if !rulesetNameRe.MatchString(rs) {
-			errs = append(errs, ValidationError{fmt.Sprintf("ids.rulesets[%d]", i), fmt.Sprintf("invalid ruleset name %q (only letters, digits, hyphens, and underscores)", rs)})
+		if !validRulesets[rs] {
+			errs = append(errs, ValidationError{fmt.Sprintf("ids.rulesets[%d]", i), fmt.Sprintf("unknown ruleset %q (supported: et-open, et-pro)", rs)})
 		}
 	}
 
 	// Network VLANs.
+	if len(cfg.Network.VLANs) > maxVLANs {
+		errs = append(errs, ValidationError{"network.vlans", fmt.Sprintf("too many VLANs (max %d)", maxVLANs)})
+	}
 	ifaceNames := make(map[string]bool)
 	for _, iface := range cfg.Network.Interfaces {
 		ifaceNames[iface.Name] = true
@@ -255,14 +332,40 @@ func Validate(cfg *Config) []ValidationError {
 		}
 	}
 
+	// VPN: EndpointOverride must not contain newlines and must be a valid host or host:port.
+	if cfg.VPN.WireGuard.EndpointOverride != "" {
+		eo := cfg.VPN.WireGuard.EndpointOverride
+		if strings.ContainsAny(eo, "\n\r") {
+			errs = append(errs, ValidationError{"vpn.wireguard.endpoint_override", "must not contain newlines"})
+		}
+		if len(eo) > maxEndpointOverrideLen {
+			errs = append(errs, ValidationError{"vpn.wireguard.endpoint_override", fmt.Sprintf("too long (max %d chars)", maxEndpointOverrideLen)})
+		}
+	}
+
 	// VPN: WireGuard peer validation.
 	peerPubKeys := make(map[string]bool)
 	peerTunnelIPs := make(map[string]bool)
 	for i, peer := range cfg.VPN.WireGuard.Peers {
+		if peer.Name != "" && !safeNameRe.MatchString(peer.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].name", i), "must contain only letters, digits, spaces, hyphens, and underscores (max 64 chars)"})
+		}
+		// PublicKey: reject newlines (config injection) and validate base64 format.
+		if peer.PublicKey != "" {
+			if strings.ContainsAny(peer.PublicKey, "\n\r") {
+				errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].public_key", i), "must not contain newlines"})
+			} else if !wgPubKeyRe.MatchString(peer.PublicKey) {
+				errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].public_key", i), "must be a valid base64-encoded 32-byte key"})
+			}
+		}
 		if peerPubKeys[peer.PublicKey] {
 			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].public_key", i), "duplicate public key"})
 		}
 		peerPubKeys[peer.PublicKey] = true
+		// TunnelIP: must be a valid IP address.
+		if peer.TunnelIP != "" && net.ParseIP(peer.TunnelIP) == nil {
+			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].tunnel_ip", i), fmt.Sprintf("invalid IP address %q", peer.TunnelIP)})
+		}
 		if peerTunnelIPs[peer.TunnelIP] {
 			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d].tunnel_ip", i), "duplicate tunnel IP"})
 		}
@@ -278,6 +381,9 @@ func Validate(cfg *Config) []ValidationError {
 	}
 
 	// Parental: profiles.
+	if len(cfg.Parental.Profiles) > maxParentalProfiles {
+		errs = append(errs, ValidationError{"parental.profiles", fmt.Sprintf("too many profiles (max %d)", maxParentalProfiles)})
+	}
 	profileIDs := make(map[string]bool)
 	profileNames := make(map[string]bool)
 	profileTagNames := make(map[string]bool) // sanitized tag names for collision detection
@@ -296,6 +402,8 @@ func Validate(cfg *Config) []ValidationError {
 		lower := strings.ToLower(p.Name)
 		if p.Name == "" {
 			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), "must not be empty"})
+		} else if len(p.Name) > maxProfileNameLen {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), fmt.Sprintf("too long (max %d chars)", maxProfileNameLen)})
 		} else if profileNames[lower] {
 			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), fmt.Sprintf("duplicate profile name %q", p.Name)})
 		}
@@ -321,6 +429,9 @@ func Validate(cfg *Config) []ValidationError {
 	}
 
 	// Parental: devices.
+	if len(cfg.Parental.Devices) > maxParentalDevices {
+		errs = append(errs, ValidationError{"parental.devices", fmt.Sprintf("too many devices (max %d)", maxParentalDevices)})
+	}
 	for i, d := range cfg.Parental.Devices {
 		if d.MAC == "" {
 			errs = append(errs, ValidationError{fmt.Sprintf("parental.devices[%d].mac", i), "must not be empty"})
@@ -343,10 +454,74 @@ func Validate(cfg *Config) []ValidationError {
 		errs = append(errs, ValidationError{"update.channel", "must be \"stable\" or \"beta\""})
 	}
 	if cfg.Update.ServerURL != "" {
-		if !strings.HasPrefix(cfg.Update.ServerURL, "https://") && !strings.HasPrefix(cfg.Update.ServerURL, "http://") {
-			errs = append(errs, ValidationError{"update.server_url", "must be a valid URL"})
+		if !strings.HasPrefix(cfg.Update.ServerURL, "https://") {
+			errs = append(errs, ValidationError{"update.server_url", "must use HTTPS"})
+		} else if isPrivateURL(cfg.Update.ServerURL) {
+			errs = append(errs, ValidationError{"update.server_url", "must not point to a private/internal IP address"})
 		}
 	}
 
 	return errs
+}
+
+// isPrivateURL checks if a URL's host resolves to a private/internal IP range.
+// Prevents SSRF attacks where the update server URL is set to an internal host.
+func isPrivateURL(rawURL string) bool {
+	// Extract host from URL.
+	host := rawURL
+	if idx := strings.Index(host, "://"); idx >= 0 {
+		host = host[idx+3:]
+	}
+	// Remove path.
+	if idx := strings.IndexByte(host, '/'); idx >= 0 {
+		host = host[:idx]
+	}
+	// Remove port.
+	if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
+		host = host[:idx]
+	}
+	if host == "" {
+		return true
+	}
+
+	// Check if host is a literal IP.
+	if ip := net.ParseIP(host); ip != nil {
+		return isPrivateIP(ip)
+	}
+
+	// Resolve hostname and check all IPs.
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false // Can't resolve — let the HTTP client fail later.
+	}
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPrivateIP checks if an IP is in a private/internal range.
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"127.0.0.0/8",
+		"::1/128",
+		"fc00::/7",
+		"fe80::/10",
+	}
+	for _, cidr := range privateRanges {
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if ipnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

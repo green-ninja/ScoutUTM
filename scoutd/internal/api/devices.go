@@ -61,6 +61,9 @@ type deviceOverlay struct {
 func (s *Server) buildOverlayMap() map[string]deviceOverlay {
 	cfg := s.Config.Current()
 	overlays := make(map[string]deviceOverlay)
+	if cfg == nil {
+		return overlays
+	}
 	for _, pd := range cfg.Parental.Devices {
 		mac := strings.ToLower(pd.MAC)
 		o := overlays[mac]
@@ -93,7 +96,11 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
-	raw, _ := url.PathUnescape(chi.URLParam(r, "mac"))
+	raw, err := url.PathUnescape(chi.URLParam(r, "mac"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid MAC format"})
+		return
+	}
 	mac := strings.ToLower(raw)
 	overlays := s.buildOverlayMap()
 
@@ -113,7 +120,11 @@ type updateDeviceRequest struct {
 }
 
 func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
-	raw, _ := url.PathUnescape(chi.URLParam(r, "mac"))
+	raw, err := url.PathUnescape(chi.URLParam(r, "mac"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid MAC format"})
+		return
+	}
 	mac := strings.ToLower(raw)
 
 	var req updateDeviceRequest
@@ -129,9 +140,8 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 
 	// Update parental profile assignment in config.
 	if req.ProfileID != nil {
-		cfg, err := s.Config.Current().DeepCopy()
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		cfg := s.requireConfig(w)
+		if cfg == nil {
 			return
 		}
 

@@ -165,7 +165,7 @@ function isScheduleActive(sched: Schedule): boolean {
       <div class="mb-8">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-semibold text-white">Profiles</h3>
-          <button class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded" @click="openAdd">
+          <button class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded" @click="openAdd">
             Add Profile
           </button>
         </div>
@@ -173,7 +173,7 @@ function isScheduleActive(sched: Schedule): boolean {
         <div v-if="!config.profiles.length" class="text-gray-500 text-sm">No profiles yet. Create one to get started.</div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div v-for="p in config.profiles" :key="p.id" class="bg-scout-800 rounded-lg p-4">
+          <div v-for="p in config.profiles" :key="p.id" class="glass rounded-xl p-4">
             <div class="flex items-center justify-between mb-2">
               <h4 class="text-white font-medium">{{ p.name }}</h4>
               <div class="flex gap-2">
@@ -202,7 +202,7 @@ function isScheduleActive(sched: Schedule): boolean {
         <p class="text-sm text-gray-500 mb-4">
           Assign parental profiles to devices. Note: devices may change MAC addresses if MAC randomization is enabled.
         </p>
-        <div class="bg-scout-800 rounded-lg overflow-hidden">
+        <div class="glass rounded-xl overflow-hidden">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-400 border-b border-scout-700">
@@ -278,7 +278,7 @@ function isScheduleActive(sched: Schedule): boolean {
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white" @click="showAddProfile = false">Cancel</button>
-          <button type="submit" class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded">
+          <button type="submit" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded">
             {{ editingProfile ? 'Update' : 'Create' }}
           </button>
         </div>

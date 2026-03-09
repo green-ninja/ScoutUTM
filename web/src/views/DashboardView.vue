@@ -21,14 +21,14 @@ onMounted(async () => {
     const [v, d, q] = await Promise.all([vpnApi.getWireGuard(), dnsApi.getDns(), dnsApi.getQueryLog()])
     vpn.value = v
     dns.value = d
-    queryLog.value = q.slice(0, 20)
+    queryLog.value = q.slice(-20)
   } catch {
     summaryError.value = true
   }
 
   refreshTimer = setInterval(async () => {
     try {
-      queryLog.value = (await dnsApi.getQueryLog()).slice(0, 20)
+      queryLog.value = (await dnsApi.getQueryLog()).slice(-20)
     } catch { /* ignore */ }
   }, 30000)
 })
@@ -91,14 +91,14 @@ function formatTime(ts: string): string {
     </div>
 
     <!-- Throughput chart -->
-    <div class="bg-scout-800 rounded-lg p-4 mb-6">
+    <div class="glass rounded-xl p-4 mb-6">
       <h3 class="text-sm font-medium text-gray-400 mb-3">WAN Throughput</h3>
       <ThroughputChart :history="stats.history" />
     </div>
 
     <!-- Summary cards -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-      <div class="bg-scout-800 rounded-lg p-4">
+      <div class="glass rounded-xl p-4">
         <h3 class="text-sm font-medium text-gray-400 mb-2">WireGuard VPN</h3>
         <template v-if="vpn">
           <p class="text-white">
@@ -113,17 +113,14 @@ function formatTime(ts: string): string {
         <p v-else class="text-gray-500 text-sm">Loading...</p>
       </div>
 
-      <div class="bg-scout-800 rounded-lg p-4">
+      <div class="glass rounded-xl p-4">
         <h3 class="text-sm font-medium text-gray-400 mb-2">DNS Filtering</h3>
         <template v-if="dns">
           <div class="flex flex-wrap gap-2 text-sm">
-            <span v-if="dns.block_malware" class="px-2 py-0.5 bg-green-900 text-green-300 rounded">Malware</span>
-            <span v-if="dns.block_phishing" class="px-2 py-0.5 bg-green-900 text-green-300 rounded">Phishing</span>
-            <span v-if="dns.block_ads" class="px-2 py-0.5 bg-green-900 text-green-300 rounded">Ads</span>
-            <span v-if="dns.use_dot" class="px-2 py-0.5 bg-blue-900 text-blue-300 rounded">DoT</span>
-            <span v-if="dns.use_doh" class="px-2 py-0.5 bg-blue-900 text-blue-300 rounded">DoH</span>
+            <span v-if="dns.block_threats" class="px-2 py-0.5 bg-green-900 text-green-300 rounded">Threats + Ads</span>
+            <span v-if="dns.use_dot" class="px-2 py-0.5 bg-violet-900/50 text-violet-300 rounded">DoT</span>
           </div>
-          <p v-if="!dns.block_malware && !dns.block_phishing && !dns.block_ads" class="text-gray-500 text-sm">
+          <p v-if="!dns.block_threats" class="text-gray-500 text-sm">
             No filters active
           </p>
         </template>
@@ -133,7 +130,7 @@ function formatTime(ts: string): string {
     </div>
 
     <!-- Recent DNS Queries -->
-    <div class="bg-scout-800 rounded-lg p-4">
+    <div class="glass rounded-xl p-4">
       <h3 class="text-sm font-medium text-gray-400 mb-3">Recent DNS Queries</h3>
       <div v-if="queryLog.length" class="overflow-x-auto">
         <table class="w-full text-sm text-left">

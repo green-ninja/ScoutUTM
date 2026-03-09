@@ -26,6 +26,7 @@ import (
 
 	"github.com/scoututm/scoutd/internal/api"
 	"github.com/scoututm/scoutd/internal/auth"
+	"github.com/scoututm/scoutd/internal/blocklist"
 	"github.com/scoututm/scoutd/internal/config"
 	"github.com/scoututm/scoutd/internal/dnslog"
 	"github.com/scoututm/scoutd/internal/ids"
@@ -140,16 +141,30 @@ func main() {
 					log.Printf("stats collect: %v", err)
 					continue
 				}
-				msg, _ := json.Marshal(map[string]interface{}{
+				msg, err := json.Marshal(map[string]interface{}{
 					"type": "stats",
 					"data": snap,
 				})
+				if err != nil {
+					log.Printf("stats marshal: %v", err)
+					continue
+				}
 				hub.Broadcast(msg)
 				// Adjust tick rate if client count changed.
 				ticker.Reset(hub.StatsInterval())
 			}
 		}
 	}()
+
+	// Fetch threats blocklist on startup if enabled.
+	if store.Current().DNS.BlockThreats {
+		n, err := blocklist.FetchThreatsBlocklist("")
+		if err != nil {
+			log.Printf("warning: threats blocklist fetch: %v", err)
+		} else {
+			log.Printf("threats blocklist: loaded %d domains", n)
+		}
+	}
 
 	// Template rendering engine.
 	engine := render.NewEngine(templateDir, outputDir, devMode)
@@ -222,10 +237,14 @@ func main() {
 				}
 				devices := scanner.Devices()
 				if !devicesEqual(prevDevices, devices) {
-					msg, _ := json.Marshal(map[string]interface{}{
+					msg, err := json.Marshal(map[string]interface{}{
 						"type": "devices",
 						"data": devices,
 					})
+					if err != nil {
+						log.Printf("devices marshal: %v", err)
+						continue
+					}
 					hub.Broadcast(msg)
 					prevDevices = devices
 				}
@@ -264,6 +283,27 @@ func main() {
 		},
 	})
 
+	// Daily threats blocklist refresh (also serves as retry if startup fetch failed).
+	sched.Register(scheduler.Task{
+		Name:  "threats-blocklist-refresh",
+		RunAt: "04:00",
+		Fn: func(ctx context.Context) error {
+			cfg := store.Current()
+			if !cfg.DNS.BlockThreats {
+				return nil
+			}
+			n, err := blocklist.FetchThreatsBlocklist("")
+			if err != nil {
+				return fmt.Errorf("threats blocklist fetch: %w", err)
+			}
+			log.Printf("threats blocklist refresh: loaded %d domains", n)
+			if err := engine.RenderUnbound(cfg); err != nil {
+				return fmt.Errorf("rendering unbound after blocklist refresh: %w", err)
+			}
+			return svcMgr.ReloadDaemons([]string{"unbound"})
+		},
+	})
+
 	// Parental schedule enforcement — check every 60s and re-render Unbound if blocked set changes.
 	var prevBlockedIPs []string
 	sched.Register(scheduler.Task{
@@ -279,7 +319,7 @@ func main() {
 			}
 			prevBlockedIPs = blocked
 
-			if err := engine.RenderUnboundWithSchedule(cfg, blocked); err != nil {
+			if err := engine.RenderUnbound(cfg); err != nil {
 				return fmt.Errorf("rendering unbound with schedule: %w", err)
 			}
 			return svcMgr.ReloadDaemons([]string{"unbound"})
@@ -309,6 +349,7 @@ func main() {
 		Handler:           router,
 		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 
@@ -329,6 +370,7 @@ func main() {
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 
@@ -361,8 +403,12 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
-	httpServer.Shutdown(shutdownCtx)
-	httpsServer.Shutdown(shutdownCtx)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP shutdown: %v", err)
+	}
+	if err := httpsServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTPS shutdown: %v", err)
+	}
 	log.Println("scoutd stopped")
 }
 
@@ -375,7 +421,7 @@ func ensureTLSCert(dir string) error {
 		return nil // Already exists.
 	}
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating TLS dir: %w", err)
 	}
 
@@ -393,7 +439,7 @@ func ensureTLSCert(dir string) error {
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: "scout.local"},
 		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour), // ~10 years
+		NotAfter:     time.Now().Add(2 * 365 * 24 * time.Hour), // ~2 years
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     []string{"scout.local", "localhost"},

@@ -77,7 +77,7 @@ function toggleAlert(i: number) {
 
     <!-- Settings -->
     <template v-if="config">
-      <div class="bg-scout-800 rounded-lg p-6 mb-6">
+      <div class="glass rounded-xl p-6 mb-6">
         <h3 class="text-lg font-semibold text-white mb-4">Settings</h3>
         <div class="space-y-4">
           <ToggleSwitch v-model="config.enabled" label="IDS Enabled" />
@@ -115,7 +115,7 @@ function toggleAlert(i: number) {
             />
           </div>
           <div class="flex justify-end">
-            <button class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded" @click="saveConfig">
+            <button class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded" @click="saveConfig">
               Save Settings
             </button>
           </div>
@@ -124,7 +124,7 @@ function toggleAlert(i: number) {
     </template>
 
     <!-- Alerts -->
-    <div class="bg-scout-800 rounded-lg overflow-hidden">
+    <div class="glass rounded-xl overflow-hidden">
       <div class="px-6 py-4 border-b border-scout-700">
         <h3 class="text-lg font-semibold text-white">Alerts</h3>
       </div>

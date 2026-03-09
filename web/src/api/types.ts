@@ -29,10 +29,7 @@ export interface PortForward {
 export interface DNSConfig {
   upstream: string[]
   use_dot: boolean
-  use_doh: boolean
-  block_malware: boolean
-  block_phishing: boolean
-  block_ads: boolean
+  block_threats: boolean
   query_logging: boolean
   custom_block: string[]
   custom_allow: string[]

@@ -21,10 +21,10 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium"
+    class="fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium border"
     :class="props.type === 'error'
-      ? 'bg-red-900 text-red-200'
-      : 'bg-green-900 text-green-200'"
+      ? 'bg-red-950/80 text-red-200 border-red-500/20'
+      : 'bg-emerald-950/80 text-emerald-200 border-emerald-500/20'"
   >
     {{ message }}
   </div>

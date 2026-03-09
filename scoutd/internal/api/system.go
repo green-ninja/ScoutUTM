@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -37,6 +36,10 @@ type systemResponse struct {
 
 func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, systemResponse{
 		Hostname:   cfg.System.Hostname,
 		Timezone:   cfg.System.Timezone,
@@ -61,9 +64,8 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -84,6 +86,7 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "system_update")
 
 	writeJSON(w, http.StatusOK, systemResponse{
 		Hostname:   cfg.System.Hostname,
@@ -95,6 +98,7 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request) {
+	auditLog(r, "reboot")
 	if s.DevMode {
 		log.Println("[dev-mode] reboot requested")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -108,7 +112,17 @@ func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
-	cfg := s.Config.Current()
+	auditLog(r, "backup_export")
+	cfg := s.requireConfig(w)
+	if cfg == nil {
+		return
+	}
+
+	// Redact secrets from backup export. On restore, current secrets are
+	// preserved if the backup has empty values (see handleRestore).
+	cfg.System.AdminHash = ""
+	cfg.VPN.WireGuard.PrivateKey = ""
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal config"})
@@ -149,15 +163,26 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Preserve current secrets if redacted in backup.
+	current := s.Config.Current()
+	if cfg.System.AdminHash == "" && current != nil {
+		cfg.System.AdminHash = current.System.AdminHash
+	}
+	if cfg.VPN.WireGuard.PrivateKey == "" && current != nil {
+		cfg.VPN.WireGuard.PrivateKey = current.VPN.WireGuard.PrivateKey
+	}
+
 	if err := s.applyConfig(&cfg); err != nil {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "config_restore")
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleRegenerateCert(w http.ResponseWriter, r *http.Request) {
+	auditLog(r, "cert_regenerate")
 	if s.DevMode {
 		log.Println("[dev-mode] certificate regeneration requested")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -169,16 +194,14 @@ func (s *Server) handleRegenerateCert(w http.ResponseWriter, r *http.Request) {
 }
 
 type aboutResponse struct {
-	Version   string `json:"version"`
-	Uptime    int    `json:"uptime"`
-	GoVersion string `json:"go_version"`
+	Version string `json:"version"`
+	Uptime  int    `json:"uptime"`
 }
 
 func (s *Server) handleAbout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, aboutResponse{
-		Version:   s.Version,
-		Uptime:    int(time.Since(s.startTime).Seconds()),
-		GoVersion: runtime.Version(),
+		Version: s.Version,
+		Uptime:  int(time.Since(s.startTime).Seconds()),
 	})
 }
 
@@ -194,7 +217,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := s.Config.Current()
+	cfg := s.requireConfig(w)
+	if cfg == nil {
+		return
+	}
 
 	// Verify current password.
 	if !auth.CheckPassword(req.Current, cfg.System.AdminHash) {
@@ -206,6 +232,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new password must be at least 10 characters"})
 		return
 	}
+	if len(req.NewPassword) > 72 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new password must not exceed 72 bytes"})
+		return
+	}
 
 	hash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
@@ -213,17 +243,18 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newCfg, err := cfg.DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	newCfg.System.AdminHash = hash
+	cfg.System.AdminHash = hash
 
-	if err := s.applyConfig(newCfg); err != nil {
+	if err := s.applyConfig(cfg); err != nil {
 		handleApplyError(w, err)
 		return
 	}
+
+	// Invalidate all other sessions so stolen tokens can't survive a
+	// password change. Keep the current session alive.
+	currentToken := extractToken(r)
+	s.Sessions.RevokeAllExcept(currentToken)
+	auditLog(r, "password_change")
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

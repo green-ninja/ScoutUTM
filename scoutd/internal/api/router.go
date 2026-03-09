@@ -61,6 +61,7 @@ func (s *Server) Router() chi.Router {
 	r.Use(redactTokenParam)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
 	r.Use(checkOrigin)
 	r.Use(maxBodySize(1 << 20)) // 1MB request body limit
 
@@ -68,6 +69,10 @@ func (s *Server) Router() chi.Router {
 		// Unauthenticated routes.
 		r.Get("/health", s.handleHealth)
 		r.Post("/auth/login", s.handleLogin)
+
+		// Wizard is unauthenticated (needed for first-boot setup when no
+		// admin password exists yet). The handler guards with SetupDone check.
+		wizardRoutes(r, s)
 
 		// Authenticated routes.
 		r.Group(func(r chi.Router) {
@@ -84,7 +89,6 @@ func (s *Server) Router() chi.Router {
 			devicesRoutes(r, s)
 			idsRoutes(r, s)
 			parentalRoutes(r, s)
-			wizardRoutes(r, s)
 		})
 	})
 
@@ -130,10 +134,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleLogin authenticates with password and returns a session token.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := r.RemoteAddr
+	ip := clientIP(r)
 
 	// Rate limiting check.
 	if !s.RateLimiter.Allow(ip) {
+		auditLog(r, "login_rate_limited")
 		w.Header().Set("Retry-After", "300")
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many login attempts"})
 		return
@@ -153,18 +158,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cfg.System.AdminHash == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no admin password configured"})
-		return
-	}
-
-	if !auth.CheckPassword(req.Password, cfg.System.AdminHash) {
+	// Use a single error message for all auth failures to prevent
+	// enumeration of whether the admin password is configured.
+	if cfg.System.AdminHash == "" || !auth.CheckPassword(req.Password, cfg.System.AdminHash) {
 		s.RateLimiter.RecordFailure(ip)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid password"})
+		auditLog(r, "login_failed")
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
 
 	s.RateLimiter.ResetIP(ip)
+	auditLog(r, "login_success")
 
 	token, err := s.Sessions.Create()
 	if err != nil {
@@ -186,6 +190,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout revokes the current session.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	auditLog(r, "logout")
 	token := extractToken(r)
 	if token != "" {
 		s.Sessions.Revoke(token)
@@ -232,17 +237,32 @@ func extractToken(r *http.Request) string {
 	if c, err := r.Cookie("scout_session"); err == nil {
 		return c.Value
 	}
-	// Fall back to query param (for WebSocket upgrade).
-	if t := r.URL.Query().Get("token"); t != "" {
-		return t
+	// Fall back to query param only for WebSocket upgrade requests.
+	if r.Header.Get("Upgrade") == "websocket" {
+		if t := r.URL.Query().Get("token"); t != "" {
+			return t
+		}
 	}
 	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// requireConfig returns the current config (already a deep copy from Store.Current).
+// If the config is nil, it writes a 500 error and returns nil.
+// Callers must check for nil before proceeding.
+func (s *Server) requireConfig(w http.ResponseWriter) *config.Config {
+	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return nil
+	}
+	return cfg
 }
 
 // maxBodySize limits the size of incoming request bodies.
@@ -265,6 +285,19 @@ func redactTokenParam(next http.Handler) http.Handler {
 			q.Set("token", "REDACTED")
 			r.URL.RawQuery = q.Encode()
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// securityHeaders adds standard security response headers.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss:; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

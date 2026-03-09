@@ -1,7 +1,6 @@
 package render
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 // SuricataData holds template data for suricata.yaml.
 type SuricataData struct {
 	HomeNet       string
+	Interface     string
 	RulePath      string
 	RuleFiles     []string
 	EveSocketPath string
@@ -25,8 +25,18 @@ func (e *Engine) RenderSuricata(cfg *config.Config) error {
 		homeNets = []string{"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"}
 	}
 
+	// Suricata monitors the LAN interface for intrusion detection.
+	lanIface := "eth1"
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone == "lan" {
+			lanIface = iface.Name
+			break
+		}
+	}
+
 	data := SuricataData{
 		HomeNet:       "[" + strings.Join(homeNets, ", ") + "]",
+		Interface:     lanIface,
 		RulePath:      "/var/lib/suricata/rules",
 		RuleFiles:     ruleFilesForRulesets(cfg.IDS.Rulesets),
 		EveSocketPath: "/var/run/suricata/eve.sock",
@@ -48,17 +58,18 @@ func (e *Engine) RenderSuricata(cfg *config.Config) error {
 	return nil
 }
 
-// ruleFilesForRulesets maps ruleset names to rule file names.
+// ruleFilesForRulesets maps known ruleset names to rule file names.
+// Unknown rulesets are silently ignored (defense-in-depth; validation
+// should reject them before they reach here).
 func ruleFilesForRulesets(rulesets []string) []string {
 	mapping := map[string]string{
 		"et-open": "suricata.rules",
+		"et-pro":  "et-pro.rules",
 	}
 	var files []string
 	for _, rs := range rulesets {
 		if f, ok := mapping[rs]; ok {
 			files = append(files, f)
-		} else {
-			files = append(files, fmt.Sprintf("%s.rules", rs))
 		}
 	}
 	if len(files) == 0 {

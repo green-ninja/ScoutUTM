@@ -39,6 +39,10 @@ type wireGuardResponse struct {
 
 func (s *Server) handleGetWireGuard(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	wg := cfg.VPN.WireGuard
 
 	resp := wireGuardResponse{
@@ -82,9 +86,8 @@ func (s *Server) handlePutWireGuard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -121,6 +124,7 @@ func (s *Server) handlePutWireGuard(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "vpn_config_update")
 
 	// Return the updated config (no private key).
 	s.handleGetWireGuard(w, r)
@@ -128,6 +132,10 @@ func (s *Server) handlePutWireGuard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetPeers(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	peers := cfg.VPN.WireGuard.Peers
 	if peers == nil {
 		peers = []config.WireGuardPeer{}
@@ -159,9 +167,8 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -169,6 +176,12 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	if !wg.Enabled {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "WireGuard is not enabled"})
+		return
+	}
+
+	// Enforce peer limit.
+	if len(wg.Peers) >= 250 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "maximum number of peers (250) reached"})
 		return
 	}
 
@@ -249,15 +262,15 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) {
 		ClientConfig: clientConfig,
 		QRCode:       base64.StdEncoding.EncodeToString(png),
 	}
+	auditLog(r, "vpn_peer_create")
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 	peerID := chi.URLParam(r, "id")
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -281,13 +294,13 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "vpn_peer_delete")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleRegenerateKeys(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -305,6 +318,7 @@ func (s *Server) handleRegenerateKeys(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "vpn_keys_regenerate")
 
 	// Return the updated config.
 	s.handleGetWireGuard(w, r)

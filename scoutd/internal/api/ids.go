@@ -15,6 +15,10 @@ func idsRoutes(r chi.Router, s *Server) {
 
 func (s *Server) handleGetIDS(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.IDS)
 }
 
@@ -34,9 +38,8 @@ func (s *Server) handlePutIDS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -64,6 +67,7 @@ func (s *Server) handlePutIDS(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "ids_config_update")
 
 	writeJSON(w, http.StatusOK, cfg.IDS)
 }

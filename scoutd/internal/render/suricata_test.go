@@ -27,9 +27,9 @@ func TestRenderSuricata_DefaultConfig(t *testing.T) {
 		t.Error("suricata.yaml missing HOME_NET 192.168.1.0/24")
 	}
 
-	// Verify fail-open.
-	if !strings.Contains(content, "fail-open: yes") {
-		t.Error("suricata.yaml missing fail-open: yes")
+	// Verify fail-closed (IPS mode should not fail open).
+	if !strings.Contains(content, "fail-open: no") {
+		t.Error("suricata.yaml missing fail-open: no")
 	}
 
 	// Verify detect profile.
@@ -55,6 +55,11 @@ func TestRenderSuricata_DefaultConfig(t *testing.T) {
 	// Verify unix_dgram output.
 	if !strings.Contains(content, "filetype: unix_dgram") {
 		t.Error("suricata.yaml missing unix_dgram filetype")
+	}
+
+	// Verify AF_PACKET interface (LAN interface from config).
+	if !strings.Contains(content, "interface: eth1") {
+		t.Error("suricata.yaml missing af-packet interface: eth1")
 	}
 }
 
@@ -145,9 +150,11 @@ func TestRuleFilesForRulesets(t *testing.T) {
 		want     []string
 	}{
 		{"et-open", []string{"et-open"}, []string{"suricata.rules"}},
-		{"unknown", []string{"custom"}, []string{"custom.rules"}},
+		{"et-pro", []string{"et-pro"}, []string{"et-pro.rules"}},
+		{"unknown_ignored", []string{"custom"}, []string{"suricata.rules"}},
 		{"empty", nil, []string{"suricata.rules"}},
-		{"mixed", []string{"et-open", "local"}, []string{"suricata.rules", "local.rules"}},
+		{"mixed_known", []string{"et-open", "et-pro"}, []string{"suricata.rules", "et-pro.rules"}},
+		{"mixed_unknown_dropped", []string{"et-open", "local"}, []string{"suricata.rules"}},
 	}
 
 	for _, tt := range tests {

@@ -154,7 +154,7 @@ table inet scout {
 {{- if and .IDS.Enabled (eq .IDS.Mode "ips")}}
 
 	chain ips {
-		queue num 0-3 fanout,bypass
+		queue num 0-3 fanout
 	}
 {{- end}}
 

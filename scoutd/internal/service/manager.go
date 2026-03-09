@@ -69,13 +69,17 @@ func (m *Manager) ReloadDaemons(daemons []string) error {
 	return nil
 }
 
-// SuricataUpdate runs suricata-update to fetch new rule signatures.
+// SuricataUpdate runs suricata-update to fetch new IDS rule signatures.
+//
+// The --etopen flag explicitly selects the Emerging Threats Open ruleset
+// over HTTPS. suricata-update verifies checksums of downloaded archives.
+// The --disable-ssl-verify flag is intentionally never used.
 func (m *Manager) SuricataUpdate() error {
 	if m.stubAll {
 		log.Printf("[dev-mode] would run suricata-update")
 		return nil
 	}
-	return runCmd("suricata-update")
+	return runCmd("suricata-update", "--etopen")
 }
 
 // HealthCheck verifies that reloaded daemons are running correctly.

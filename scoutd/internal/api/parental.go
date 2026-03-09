@@ -42,11 +42,19 @@ var timeRe = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
 
 func (s *Server) handleGetParental(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Parental)
 }
 
 func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Parental.Profiles)
 }
 
@@ -58,10 +66,12 @@ type createProfileRequest struct {
 	Schedule          config.Schedule `json:"schedule"`
 }
 
-func generateID() string {
+func generateID() (string, error) {
 	b := make([]byte, 8)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
@@ -81,9 +91,8 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -95,8 +104,14 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	id, err := generateID()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
 	profile := config.ParentalProfile{
-		ID:                generateID(),
+		ID:                id,
 		Name:              req.Name,
 		BlockCategories:   req.BlockCategories,
 		SafeSearch:        req.SafeSearch,
@@ -116,6 +131,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "parental_profile_create")
 
 	writeJSON(w, http.StatusCreated, profile)
 }
@@ -139,9 +155,8 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -181,6 +196,7 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "parental_profile_update")
 
 	writeJSON(w, http.StatusOK, cfg.Parental.Profiles[idx])
 }
@@ -188,9 +204,8 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -222,6 +237,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "parental_profile_delete")
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -238,9 +254,8 @@ func (s *Server) handleAssignDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -285,6 +300,7 @@ func (s *Server) handleAssignDevices(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "parental_devices_assign")
 
 	writeJSON(w, http.StatusOK, cfg.Parental)
 }

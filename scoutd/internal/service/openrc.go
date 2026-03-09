@@ -17,8 +17,7 @@ func reloadDaemon(name string) error {
 	case Unbound:
 		return runCmd("rc-service", "unbound", "restart")
 	case Suricata:
-		// Stub — will be implemented in Month 5.
-		return runCmd("suricatasc", "-c", "reload-rules")
+		return runCmd("rc-service", "suricata", "restart")
 	case WireGuard:
 		// Stub — will be implemented in Month 4.
 		return runCmd("wg", "syncconf", "wg0", "/etc/wireguard/wg0.conf")

@@ -9,16 +9,20 @@ $BuildDir = Join-Path $ProjectDir "build"
 Write-Host "=== ScoutUTM Build ===" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Build frontend.
+# 1. Build frontend (npm ci enforces exact versions from package-lock.json).
 Write-Host "[1/5] Building frontend..."
 Push-Location (Join-Path $ProjectDir "web")
+npm ci --ignore-scripts
+if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 npm run build --silent
 if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 Pop-Location
 Write-Host "  OK: scoutd\web\dist\" -ForegroundColor Green
 
-# 2. Build scoutd binary (Go is in WSL, not Windows).
+# 2. Verify Go module checksums and build scoutd binary (Go is in WSL, not Windows).
 Write-Host "[2/5] Building scoutd via WSL..."
+wsl bash -c "cd scoutd && /usr/local/go/bin/go mod verify"
+if ($LASTEXITCODE -ne 0) { throw "go mod verify failed - module checksums do not match go.sum" }
 wsl bash -c "cd scoutd && CGO_ENABLED=0 /usr/local/go/bin/go build -ldflags '-X main.version=0.1.0-dev' -o ../build/scoutd ./cmd/scoutd/"
 if ($LASTEXITCODE -ne 0) { throw "scoutd build failed" }
 Write-Host "  OK: build\scoutd" -ForegroundColor Green

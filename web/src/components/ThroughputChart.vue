@@ -31,12 +31,12 @@ function createChart() {
     },
     axes: [
       {
-        stroke: '#6b7280',
-        grid: { stroke: '#1f2937', width: 1 },
+        stroke: '#4b5563',
+        grid: { stroke: '#161620', width: 1 },
       },
       {
-        stroke: '#6b7280',
-        grid: { stroke: '#1f2937', width: 1 },
+        stroke: '#4b5563',
+        grid: { stroke: '#161620', width: 1 },
         values: (self: uPlot, vals: number[]) => vals.map((v) => formatBps(self, v)),
         size: 70,
       },
@@ -45,9 +45,9 @@ function createChart() {
       {},
       {
         label: 'RX',
-        stroke: '#60a5fa',
+        stroke: '#a78bfa',
         width: 2,
-        fill: 'rgba(96,165,250,0.1)',
+        fill: 'rgba(167,139,250,0.08)',
       },
       {
         label: 'TX',

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/scoututm/scoutd/internal/auth"
@@ -214,6 +215,188 @@ func TestAuthMiddleware_AcceptsCookie(t *testing.T) {
 
 	if w.Code == http.StatusUnauthorized {
 		t.Errorf("cookie auth: status = %d, want non-401", w.Code)
+	}
+}
+
+func TestWizard_AccessibleWithoutAuth(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+
+	// Wizard step 1 should be accessible without authentication when setup is not done.
+	req := httptest.NewRequest("POST", "/api/v1/wizard/step/1", nil)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code == http.StatusUnauthorized {
+		t.Errorf("wizard step 1 without auth: status = %d, should not be 401", w.Code)
+	}
+}
+
+func TestWizard_BlockedAfterSetupNoAuth(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+
+	// Mark setup as done.
+	cfg := srv.Config.Current()
+	cfg.System.SetupDone = true
+	srv.Config.SetCurrent(cfg)
+
+	// Without any auth token, wizard should still return 403 (not 401).
+	req := httptest.NewRequest("POST", "/api/v1/wizard/step/1", nil)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("wizard after setup (no auth): status = %d, want 403", w.Code)
+	}
+}
+
+func TestBackup_RedactsSecrets(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+	token := loginAndGetToken(t, srv, "testpassword")
+
+	// Set a WireGuard private key so we can verify it's redacted.
+	cfg := srv.Config.Current()
+	cfg.VPN.WireGuard.PrivateKey = "secret-private-key"
+	srv.Config.SetCurrent(cfg)
+	srv.Config.Save()
+
+	req := httptest.NewRequest("GET", "/api/v1/system/backup", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("backup: status = %d, want 200", w.Code)
+	}
+
+	body := w.Body.String()
+	if strings.Contains(body, "secret-private-key") {
+		t.Error("backup response contains WireGuard private key")
+	}
+	// AdminHash should be redacted (empty string in JSON).
+	var backup map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &backup)
+	sys := backup["system"].(map[string]interface{})
+	if hash, ok := sys["admin_hash"]; ok && hash != "" {
+		t.Error("backup response contains non-empty admin_hash")
+	}
+}
+
+func TestPasswordChange_RevokesOtherSessions(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+
+	token1 := loginAndGetToken(t, srv, "testpassword")
+	token2 := loginAndGetToken(t, srv, "testpassword")
+
+	// Change password using token1.
+	body, _ := json.Marshal(map[string]string{
+		"current":      "testpassword",
+		"new_password": "newpassword123",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/system/password", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token1)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("password change: status = %d, want 200", w.Code)
+	}
+
+	// token1 (used for password change) should still be valid.
+	req = httptest.NewRequest("GET", "/api/v1/system", nil)
+	req.Header.Set("Authorization", "Bearer "+token1)
+	w = httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+	if w.Code == http.StatusUnauthorized {
+		t.Error("token used for password change should still be valid")
+	}
+
+	// token2 (other session) should be revoked.
+	req = httptest.NewRequest("GET", "/api/v1/system", nil)
+	req.Header.Set("Authorization", "Bearer "+token2)
+	w = httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("other session after password change: status = %d, want 401", w.Code)
+	}
+}
+
+func TestSecurityHeaders_Present(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest("GET", "/api/v1/health", nil)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing X-Content-Type-Options: nosniff header")
+	}
+	if w.Header().Get("X-Frame-Options") != "DENY" {
+		t.Error("missing X-Frame-Options: DENY header")
+	}
+	if w.Header().Get("Strict-Transport-Security") == "" {
+		t.Error("missing Strict-Transport-Security header")
+	}
+	if w.Header().Get("Referrer-Policy") != "strict-origin-when-cross-origin" {
+		t.Error("missing Referrer-Policy header")
+	}
+	if w.Header().Get("Permissions-Policy") == "" {
+		t.Error("missing Permissions-Policy header")
+	}
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("missing Cache-Control: no-store header on API response")
+	}
+}
+
+func TestLogin_UnifiedErrorMessages(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+
+	// With no admin password set, login should return generic "invalid credentials"
+	// (not "no admin password configured" which leaks setup state).
+	body, _ := json.Marshal(map[string]string{"password": "anything"})
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["error"] != "invalid credentials" {
+		t.Errorf("login error with no password = %q, want 'invalid credentials'", resp["error"])
+	}
+
+	// With wrong password, should return the same message.
+	setAdminPassword(t, srv, "testpassword")
+	body, _ = json.Marshal(map[string]string{"password": "wrong"})
+	req = httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["error"] != "invalid credentials" {
+		t.Errorf("login error with wrong password = %q, want 'invalid credentials'", resp["error"])
+	}
+}
+
+func TestQueryParamToken_BlockedForNonWebSocket(t *testing.T) {
+	srv, cleanup := testServer(t)
+	defer cleanup()
+	setAdminPassword(t, srv, "testpassword")
+	token := loginAndGetToken(t, srv, "testpassword")
+
+	// Query param token should NOT work for normal API requests.
+	req := httptest.NewRequest("GET", "/api/v1/firewall?token="+token, nil)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("query param token on non-WebSocket: status = %d, want 401", w.Code)
 	}
 }
 

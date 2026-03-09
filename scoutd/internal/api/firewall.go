@@ -24,6 +24,10 @@ func firewallRoutes(r chi.Router, s *Server) {
 
 func (s *Server) handleGetFirewall(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Firewall)
 }
 
@@ -34,9 +38,8 @@ func (s *Server) handlePutFirewall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 	cfg.Firewall = fw
@@ -45,11 +48,16 @@ func (s *Server) handlePutFirewall(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "firewall_update")
 	writeJSON(w, http.StatusOK, cfg.Firewall)
 }
 
 func (s *Server) handleGetRules(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Firewall.Rules)
 }
 
@@ -60,9 +68,8 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 	cfg.Firewall.Rules = append(cfg.Firewall.Rules, rule)
@@ -71,6 +78,7 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "firewall_rule_create")
 	writeJSON(w, http.StatusCreated, rule)
 }
 
@@ -88,9 +96,8 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -104,6 +111,7 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "firewall_rule_update")
 	writeJSON(w, http.StatusOK, rule)
 }
 
@@ -115,9 +123,8 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -131,11 +138,16 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "firewall_rule_delete")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleGetPortForwards(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Firewall.PortForwards)
 }
 
@@ -146,9 +158,8 @@ func (s *Server) handleCreatePortForward(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 	cfg.Firewall.PortForwards = append(cfg.Firewall.PortForwards, pf)
@@ -157,6 +168,7 @@ func (s *Server) handleCreatePortForward(w http.ResponseWriter, r *http.Request)
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "port_forward_create")
 	writeJSON(w, http.StatusCreated, pf)
 }
 
@@ -174,9 +186,8 @@ func (s *Server) handleUpdatePortForward(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -190,6 +201,7 @@ func (s *Server) handleUpdatePortForward(w http.ResponseWriter, r *http.Request)
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "port_forward_update")
 	writeJSON(w, http.StatusOK, pf)
 }
 
@@ -201,9 +213,8 @@ func (s *Server) handleDeletePortForward(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -217,5 +228,6 @@ func (s *Server) handleDeletePortForward(w http.ResponseWriter, r *http.Request)
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "port_forward_delete")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

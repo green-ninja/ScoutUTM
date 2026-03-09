@@ -3,7 +3,7 @@ package config
 import "encoding/json"
 
 // CurrentSchemaVersion is the config schema version this build expects.
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 2
 
 // Config is the top-level configuration for ScoutOS.
 type Config struct {
@@ -93,10 +93,7 @@ type PortForward struct {
 type DNSConfig struct {
 	Upstream     []string `json:"upstream"`
 	UseDOT       bool     `json:"use_dot"`
-	UseDOH       bool     `json:"use_doh"`
-	BlockMalware bool     `json:"block_malware"`
-	BlockPhishing bool    `json:"block_phishing"`
-	BlockAds     bool     `json:"block_ads"`
+	BlockThreats bool     `json:"block_threats"`
 	QueryLogging bool     `json:"query_logging"`
 	CustomBlock  []string `json:"custom_block"`
 	CustomAllow  []string `json:"custom_allow"`
@@ -211,11 +208,8 @@ func DefaultConfig() *Config {
 		},
 		DNS: DNSConfig{
 			Upstream:      []string{"1.1.1.1", "9.9.9.9"},
-			UseDOT:        false,
-			UseDOH:        false,
-			BlockMalware:  true,
-			BlockPhishing: true,
-			BlockAds:      false,
+			UseDOT:        true,
+			BlockThreats:  true,
 			QueryLogging:  true,
 			CustomBlock:   []string{},
 			CustomAllow:   []string{},

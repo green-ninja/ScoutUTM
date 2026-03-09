@@ -64,9 +64,16 @@ logging:
         enabled: yes
         facility: daemon
 
+af-packet:
+  - interface: {{.Interface}}
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+
 nfq:
   mode: accept
-  fail-open: yes
+  fail-open: no
 
 runmode: autofp
 

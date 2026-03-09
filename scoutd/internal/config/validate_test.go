@@ -618,8 +618,9 @@ func TestValidate_IDSRulesetName(t *testing.T) {
 		ruleset string
 		wantErr bool
 	}{
-		{"valid", "et-open", false},
-		{"valid_underscore", "custom_rules", false},
+		{"valid_et_open", "et-open", false},
+		{"valid_et_pro", "et-pro", false},
+		{"unknown_custom", "custom_rules", true},
 		{"path_traversal", "../../etc/passwd", true},
 		{"yaml_injection", "rules\n  - evil", true},
 		{"space", "et open", true},

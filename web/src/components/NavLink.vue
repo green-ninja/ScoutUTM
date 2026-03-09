@@ -12,10 +12,10 @@ const route = useRoute()
 <template>
   <RouterLink
     :to="props.to"
-    class="block px-4 py-2 rounded text-sm font-medium transition-colors"
+    class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
     :class="route.path === props.to || route.path.startsWith(props.to + '/')
-      ? 'bg-scout-accent text-white'
-      : 'text-gray-400 hover:text-white hover:bg-scout-700'"
+      ? 'bg-violet-500/10 text-white'
+      : 'text-gray-500 hover:text-gray-200 hover:bg-white/[0.03]'"
   >
     {{ props.label }}
   </RouterLink>

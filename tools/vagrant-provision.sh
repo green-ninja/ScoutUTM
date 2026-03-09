@@ -22,7 +22,16 @@ https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main
 https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community
 EOF
 
-# Install ScoutOS packages.
+# Verify APK signing keys are present before installing packages.
+if [ ! -d /etc/apk/keys ] || [ -z "$(ls /etc/apk/keys/ 2>/dev/null)" ]; then
+  echo "ERROR: APK signing keys not found in /etc/apk/keys/"
+  echo "  Package signature verification is not possible."
+  exit 1
+fi
+
+# Install ScoutOS packages. APK verifies package signatures against
+# /etc/apk/keys/ by default. The --no-scripts flag prevents execution
+# of untrusted post-install scripts from packages.
 apk update
 apk add \
   nftables \
@@ -108,6 +117,7 @@ chmod +x /etc/init.d/scoutd
 rc-update add nftables default 2>/dev/null || true
 rc-update add dnsmasq default 2>/dev/null || true
 rc-update add unbound default 2>/dev/null || true
+rc-update add suricata default 2>/dev/null || true
 rc-update add chronyd default 2>/dev/null || true
 rc-update add scoutd default 2>/dev/null || true
 
@@ -155,10 +165,19 @@ for zone in rpz-malware rpz-phishing rpz-ads rpz-parental-adult rpz-parental-gam
 RPZEOF
 done
 
+# Prepare Suricata prerequisites.
+mkdir -p /var/run/suricata
+mkdir -p /var/lib/suricata/rules
+mkdir -p /var/lib/suricata/update
+# Download ET Open rules via suricata-update.
+echo "Downloading Suricata rules (ET Open)..."
+suricata-update --no-test --no-reload 2>/dev/null || echo "WARNING: suricata-update failed (rules may be missing)"
+
 # Start other daemons.
 rc-service chronyd start 2>/dev/null || true
 rc-service dnsmasq start 2>/dev/null || true
 rc-service unbound start || echo "WARNING: unbound failed to start"
+rc-service suricata start 2>/dev/null || echo "WARNING: suricata failed to start"
 
 # Reload scout nftables rules — rc-service nftables start may have loaded Alpine defaults.
 nft -f /etc/nftables.conf 2>/dev/null || echo "WARNING: nft reload failed"
@@ -168,9 +187,10 @@ echo ""
 echo "=== Provisioning complete ==="
 echo ""
 echo "Checking services..."
-echo "  scoutd:  $(rc-service scoutd status 2>/dev/null || echo 'not running')"
-echo "  unbound: $(rc-service unbound status 2>/dev/null || echo 'not running')"
-echo "  chronyd: $(rc-service chronyd status 2>/dev/null || echo 'not running')"
+echo "  scoutd:   $(rc-service scoutd status 2>/dev/null || echo 'not running')"
+echo "  unbound:  $(rc-service unbound status 2>/dev/null || echo 'not running')"
+echo "  suricata: $(rc-service suricata status 2>/dev/null || echo 'not running')"
+echo "  chronyd:  $(rc-service chronyd status 2>/dev/null || echo 'not running')"
 echo ""
 echo "Checking ports..."
 ss -tlnp 2>/dev/null | grep -E ':(22|80|443)\s' || echo "  (no listeners found on 22/80/443)"

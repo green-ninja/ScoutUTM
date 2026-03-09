@@ -7,11 +7,16 @@ import (
 	"time"
 )
 
-const defaultTTL = 24 * time.Hour
+const (
+	defaultTTL     = 24 * time.Hour
+	absoluteMaxLife = 7 * 24 * time.Hour // 7 days
+	maxSessions    = 50
+)
 
 type session struct {
-	Token    string
-	LastSeen time.Time
+	Token     string
+	CreatedAt time.Time
+	LastSeen  time.Time
 }
 
 // SessionManager holds active sessions in memory.
@@ -91,6 +96,24 @@ func (l *LoginRateLimiter) RecordFailure(ip string) {
 
 	now := time.Now()
 
+	// Cap perIP map size to prevent unbounded growth from distributed attacks.
+	const maxPerIPEntries = 10000
+	if len(l.perIP) >= maxPerIPEntries {
+		// Evict expired entries first.
+		for k, v := range l.perIP {
+			if now.After(v.resetAt) {
+				delete(l.perIP, k)
+			}
+		}
+		// If still over limit, evict oldest entries.
+		for k := range l.perIP {
+			if len(l.perIP) < maxPerIPEntries {
+				break
+			}
+			delete(l.perIP, k)
+		}
+	}
+
 	a, ok := l.perIP[ip]
 	if !ok {
 		a = &loginAttempt{}
@@ -150,9 +173,15 @@ func (m *SessionManager) Create() (string, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Enforce max session count — evict oldest if full.
+	if len(m.sessions) >= maxSessions {
+		m.evictOldest()
+	}
+	now := time.Now()
 	m.sessions[token] = &session{
-		Token:    token,
-		LastSeen: time.Now(),
+		Token:     token,
+		CreatedAt: now,
+		LastSeen:  now,
 	}
 	return token, nil
 }
@@ -166,11 +195,17 @@ func (m *SessionManager) Validate(token string) bool {
 	if !ok {
 		return false
 	}
-	if time.Since(s.LastSeen) > m.ttl {
+	now := time.Now()
+	if now.Sub(s.LastSeen) > m.ttl {
 		delete(m.sessions, token)
 		return false
 	}
-	s.LastSeen = time.Now()
+	// Enforce absolute session lifetime.
+	if now.Sub(s.CreatedAt) > absoluteMaxLife {
+		delete(m.sessions, token)
+		return false
+	}
+	s.LastSeen = now
 	return true
 }
 
@@ -181,13 +216,39 @@ func (m *SessionManager) Revoke(token string) {
 	delete(m.sessions, token)
 }
 
+// RevokeAllExcept revokes all sessions except the one with the given token.
+func (m *SessionManager) RevokeAllExcept(except string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for token := range m.sessions {
+		if token != except {
+			delete(m.sessions, token)
+		}
+	}
+}
+
+// evictOldest removes the session with the oldest LastSeen. Must be called with lock held.
+func (m *SessionManager) evictOldest() {
+	var oldestToken string
+	var oldestTime time.Time
+	for token, s := range m.sessions {
+		if oldestToken == "" || s.LastSeen.Before(oldestTime) {
+			oldestToken = token
+			oldestTime = s.LastSeen
+		}
+	}
+	if oldestToken != "" {
+		delete(m.sessions, oldestToken)
+	}
+}
+
 // Cleanup removes all expired sessions.
 func (m *SessionManager) Cleanup() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
 	for token, s := range m.sessions {
-		if now.Sub(s.LastSeen) > m.ttl {
+		if now.Sub(s.LastSeen) > m.ttl || now.Sub(s.CreatedAt) > absoluteMaxLife {
 			delete(m.sessions, token)
 		}
 	}

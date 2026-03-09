@@ -57,6 +57,24 @@ func WriteZoneFile(path, category string) error {
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
+// WritePassthruZone writes an RPZ zone file with passthru entries for the
+// given domains. CNAME rpz-passthru. tells Unbound to allow the response
+// through without applying subsequent RPZ block rules.
+func WritePassthruZone(path string, domains []string) error {
+	var b strings.Builder
+	b.WriteString(rpzHeader)
+	for _, d := range domains {
+		fmt.Fprintf(&b, "%s CNAME rpz-passthru.\n", d)
+		fmt.Fprintf(&b, "*.%s CNAME rpz-passthru.\n", d)
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
 // Categories returns all supported parental block category names.
 func Categories() []string {
 	return []string{"adult", "gambling", "gaming", "social_media", "streaming"}

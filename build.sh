@@ -15,15 +15,17 @@ done
 echo "=== ScoutUTM Build ==="
 echo ""
 
-# 1. Build frontend.
+# 1. Build frontend (npm ci enforces exact versions from package-lock.json).
 echo "[1/5] Building frontend..."
 cd "$PROJECT_DIR/web"
+npm ci --ignore-scripts
 npm run build --silent
 echo "  OK: scoutd/web/dist/"
 
-# 2. Build scoutd binary.
+# 2. Verify Go module checksums and build scoutd binary.
 echo "[2/5] Building scoutd..."
 cd "$PROJECT_DIR/scoutd"
+"$GO" mod verify
 CGO_ENABLED=0 "$GO" build -ldflags "-X main.version=0.1.0-dev" -o "$BUILD_DIR/scoutd" ./cmd/scoutd/
 echo "  OK: build/scoutd"
 

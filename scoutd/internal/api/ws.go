@@ -28,7 +28,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := ws.NewClient(s.Hub, conn)
+	client := ws.NewClient(s.Hub, conn, clientIP(r))
 	if !s.Hub.Register(client) {
 		conn.Close(websocket.StatusTryAgainLater, "too many connections")
 		return

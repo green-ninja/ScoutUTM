@@ -152,8 +152,12 @@ func TestSystem_About(t *testing.T) {
 	if resp.Version != "0.1.0-test" {
 		t.Errorf("version = %q, want 0.1.0-test", resp.Version)
 	}
-	if resp.GoVersion == "" {
-		t.Error("go_version is empty")
+
+	// GoVersion should NOT be exposed (information disclosure risk).
+	var raw map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &raw)
+	if _, ok := raw["go_version"]; ok {
+		t.Error("about response should not expose go_version")
 	}
 }
 

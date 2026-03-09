@@ -6,12 +6,16 @@ import (
 	"time"
 )
 
-const maxClients = 10
+const (
+	maxClients    = 10
+	maxPerIPConns = 3
+)
 
 // Hub manages WebSocket client connections and broadcasts.
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[*Client]bool
+	perIP   map[string]int // Track connections per IP.
 
 	// Alert rate limiting: per-client token buckets.
 	alertMu     sync.Mutex
@@ -22,18 +26,25 @@ type Hub struct {
 func NewHub() *Hub {
 	return &Hub{
 		clients:     make(map[*Client]bool),
+		perIP:       make(map[string]int),
 		alertTokens: make(map[*Client]*tokenBucket),
 	}
 }
 
-// Register adds a client. Returns false if at capacity.
+// Register adds a client. Returns false if at capacity or per-IP limit reached.
 func (h *Hub) Register(c *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.clients) >= maxClients {
 		return false
 	}
+	if c.IP != "" && h.perIP[c.IP] >= maxPerIPConns {
+		return false
+	}
 	h.clients[c] = true
+	if c.IP != "" {
+		h.perIP[c.IP]++
+	}
 
 	h.alertMu.Lock()
 	h.alertTokens[c] = newTokenBucket(10, 10) // 10 alerts/sec, burst 10
@@ -49,6 +60,12 @@ func (h *Hub) Unregister(c *Client) {
 	if _, ok := h.clients[c]; ok {
 		delete(h.clients, c)
 		close(c.Send)
+		if c.IP != "" {
+			h.perIP[c.IP]--
+			if h.perIP[c.IP] <= 0 {
+				delete(h.perIP, c.IP)
+			}
+		}
 	}
 
 	h.alertMu.Lock()

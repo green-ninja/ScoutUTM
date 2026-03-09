@@ -136,7 +136,7 @@ function formatUptime(seconds: number): string {
 
     <template v-if="config">
       <!-- Settings -->
-      <div class="bg-scout-800 rounded-lg p-6 mb-6">
+      <div class="glass rounded-xl p-6 mb-6">
         <h3 class="text-lg font-semibold text-white mb-4">Settings</h3>
         <div class="space-y-4 max-w-lg">
           <div>
@@ -161,7 +161,7 @@ function formatUptime(seconds: number): string {
             />
           </div>
           <div class="flex justify-end">
-            <button class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded" @click="saveSettings">
+            <button class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded" @click="saveSettings">
               Save Settings
             </button>
           </div>
@@ -169,7 +169,7 @@ function formatUptime(seconds: number): string {
       </div>
 
       <!-- Actions -->
-      <div class="bg-scout-800 rounded-lg p-6 mb-6">
+      <div class="glass rounded-xl p-6 mb-6">
         <h3 class="text-lg font-semibold text-white mb-4">Actions</h3>
         <div class="flex flex-wrap gap-3">
           <button class="px-4 py-2 bg-scout-700 hover:bg-scout-600 text-white text-sm rounded" @click="showPasswordModal = true">
@@ -192,7 +192,7 @@ function formatUptime(seconds: number): string {
       </div>
 
       <!-- About -->
-      <div v-if="about" class="bg-scout-800 rounded-lg p-6">
+      <div v-if="about" class="glass rounded-xl p-6">
         <h3 class="text-lg font-semibold text-white mb-4">About</h3>
         <div class="space-y-2 text-sm">
           <p class="text-gray-400">Version: <span class="text-white">{{ about.version }}</span></p>
@@ -219,7 +219,7 @@ function formatUptime(seconds: number): string {
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white" @click="showPasswordModal = false">Cancel</button>
-          <button type="submit" class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded">Change</button>
+          <button type="submit" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded">Change</button>
         </div>
       </form>
     </Modal>
@@ -238,7 +238,7 @@ function formatUptime(seconds: number): string {
       <p class="text-gray-300 mb-4">This will generate a new self-signed TLS certificate. You may need to accept the new certificate in your browser.</p>
       <div class="flex justify-end gap-3">
         <button class="px-4 py-2 text-sm text-gray-400 hover:text-white" @click="showRegenCertModal = false">Cancel</button>
-        <button class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded" @click="handleRegenCert">Regenerate</button>
+        <button class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded" @click="handleRegenCert">Regenerate</button>
       </div>
     </Modal>
   </div>

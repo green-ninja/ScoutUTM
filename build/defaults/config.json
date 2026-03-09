@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "system": {
     "hostname": "scoututm",
     "timezone": "UTC",
@@ -28,11 +28,8 @@
   },
   "dns": {
     "upstream": ["1.1.1.1", "9.9.9.9"],
-    "use_dot": false,
-    "use_doh": false,
-    "block_malware": true,
-    "block_phishing": true,
-    "block_ads": false,
+    "use_dot": true,
+    "block_threats": true,
     "query_logging": true,
     "custom_block": [],
     "custom_allow": []

@@ -11,14 +11,16 @@ type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
 	Send chan []byte
+	IP   string // Remote IP for per-IP connection limiting.
 }
 
 // NewClient creates a Client for the given connection.
-func NewClient(hub *Hub, conn *websocket.Conn) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, ip string) *Client {
 	return &Client{
 		hub:  hub,
 		conn: conn,
 		Send: make(chan []byte, 16),
+		IP:   ip,
 	}
 }
 

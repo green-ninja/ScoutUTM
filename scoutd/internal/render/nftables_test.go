@@ -125,7 +125,7 @@ func TestRenderNftables_IPSMode(t *testing.T) {
 	if !strings.Contains(content, "chain ips") {
 		t.Error("expected IPS chain when mode=ips")
 	}
-	if !strings.Contains(content, "queue num 0-3 fanout,bypass") {
+	if !strings.Contains(content, "queue num 0-3 fanout") {
 		t.Error("expected NFQUEUE rule in IPS chain")
 	}
 	if !strings.Contains(content, "jump ips") {

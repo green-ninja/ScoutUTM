@@ -1,9 +1,18 @@
 package auth
 
-import "golang.org/x/crypto/bcrypt"
+import (
+	"errors"
+
+	"golang.org/x/crypto/bcrypt"
+)
 
 // HashPassword returns a bcrypt hash of the password.
+// bcrypt silently truncates at 72 bytes, so reject longer passwords
+// to avoid a false sense of security.
 func HashPassword(password string) (string, error) {
+	if len(password) > 72 {
+		return "", errors.New("password exceeds 72 bytes (bcrypt limit)")
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err

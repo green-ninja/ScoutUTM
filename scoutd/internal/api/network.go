@@ -23,6 +23,10 @@ func networkRoutes(r chi.Router, s *Server) {
 
 func (s *Server) handleGetNetwork(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Network)
 }
 
@@ -33,9 +37,8 @@ func (s *Server) handlePutNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 	cfg.Network = net
@@ -44,11 +47,16 @@ func (s *Server) handlePutNetwork(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "network_update")
 	writeJSON(w, http.StatusOK, cfg.Network)
 }
 
 func (s *Server) handleGetZones(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Network.Zones)
 }
 
@@ -59,9 +67,8 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 	cfg.Network.Zones = append(cfg.Network.Zones, zone)
@@ -70,6 +77,7 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "zone_create")
 	writeJSON(w, http.StatusCreated, zone)
 }
 
@@ -82,9 +90,8 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -128,11 +135,16 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "zone_delete")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleGetVLANs(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.Network.VLANs)
 }
 
@@ -143,9 +155,8 @@ func (s *Server) handleCreateVLAN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -163,6 +174,7 @@ func (s *Server) handleCreateVLAN(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "vlan_create")
 	writeJSON(w, http.StatusCreated, vlan)
 }
 
@@ -174,9 +186,8 @@ func (s *Server) handleDeleteVLAN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -223,5 +234,6 @@ func (s *Server) handleDeleteVLAN(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "vlan_delete")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

@@ -218,7 +218,7 @@ func (r *Reader) processLine(line []byte) {
 
 // openLog opens the persistent EVE log file for appending.
 func (r *Reader) openLog() {
-	f, err := os.OpenFile(r.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(r.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		log.Printf("EVE log open error: %v", err)
 		return

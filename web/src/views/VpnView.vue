@@ -111,7 +111,7 @@ async function copyConfig() {
 
     <div v-if="config" class="space-y-6">
       <!-- WireGuard settings -->
-      <div class="bg-scout-800 rounded-lg p-6">
+      <div class="glass rounded-xl p-6">
         <h3 class="text-sm font-medium text-gray-400 mb-4">WireGuard Settings</h3>
         <div class="space-y-4">
           <ToggleSwitch v-model="config.enabled" label="Enable WireGuard" />
@@ -154,7 +154,7 @@ async function copyConfig() {
 
           <div class="flex justify-end">
             <button
-              class="px-6 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded transition-colors disabled:opacity-50"
+              class="px-6 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded transition-colors disabled:opacity-50"
               :disabled="loading"
               @click="saveConfig"
             >
@@ -165,11 +165,11 @@ async function copyConfig() {
       </div>
 
       <!-- Peers -->
-      <div class="bg-scout-800 rounded-lg p-6">
+      <div class="glass rounded-xl p-6">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-sm font-medium text-gray-400">Peers</h3>
           <button
-            class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded transition-colors"
+            class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded transition-colors"
             @click="showAddPeer = true"
           >
             Add Peer
@@ -228,7 +228,7 @@ async function copyConfig() {
         <ToggleSwitch v-model="newPeerSplitTunnel" label="Split tunnel (LAN access only)" />
         <div class="flex justify-end gap-3 pt-2">
           <button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white" @click="showAddPeer = false">Cancel</button>
-          <button type="submit" class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded">Create</button>
+          <button type="submit" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded">Create</button>
         </div>
       </form>
     </Modal>
@@ -245,7 +245,7 @@ async function copyConfig() {
         </div>
         <div class="flex justify-end gap-3">
           <button class="px-4 py-2 text-sm text-gray-400 hover:text-white" @click="copyConfig">Copy Config</button>
-          <button class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded" @click="showQR = false">Done</button>
+          <button class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded" @click="showQR = false">Done</button>
         </div>
       </div>
     </Modal>

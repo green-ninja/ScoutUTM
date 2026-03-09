@@ -20,12 +20,12 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 <template>
   <Teleport to="body">
     <div class="fixed inset-0 z-50 flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/60" @click="emit('close')" />
-      <div class="relative bg-scout-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+      <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="emit('close')" />
+      <div class="relative glass rounded-xl shadow-2xl shadow-violet-500/5 w-full max-w-lg mx-4 p-6">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-semibold text-white">{{ title }}</h3>
           <button
-            class="text-gray-400 hover:text-white transition-colors"
+            class="text-gray-500 hover:text-white transition-colors"
             @click="emit('close')"
           >
             &times;

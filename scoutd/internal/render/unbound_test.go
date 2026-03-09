@@ -38,12 +38,12 @@ func TestRenderUnbound_Default(t *testing.T) {
 		t.Error("expected access-control for localhost")
 	}
 
-	// Default upstreams.
-	if !strings.Contains(content, "forward-addr: 1.1.1.1@53") {
-		t.Error("expected forward-addr for 1.1.1.1")
+	// Default upstreams with DoT (port 853).
+	if !strings.Contains(content, "forward-addr: 1.1.1.1@853") {
+		t.Error("expected forward-addr for 1.1.1.1 on port 853")
 	}
-	if !strings.Contains(content, "forward-addr: 9.9.9.9@53") {
-		t.Error("expected forward-addr for 9.9.9.9")
+	if !strings.Contains(content, "forward-addr: 9.9.9.9@853") {
+		t.Error("expected forward-addr for 9.9.9.9 on port 853")
 	}
 
 	// Reply logging on by default.
@@ -51,12 +51,15 @@ func TestRenderUnbound_Default(t *testing.T) {
 		t.Error("expected log-replies: yes")
 	}
 
-	// No TLS by default.
-	if strings.Contains(content, "forward-tls-upstream") {
-		t.Error("unexpected forward-tls-upstream in default config")
+	// DoT enabled by default.
+	if !strings.Contains(content, "forward-tls-upstream: yes") {
+		t.Error("expected forward-tls-upstream: yes by default")
+	}
+	if !strings.Contains(content, "tls-cert-bundle") {
+		t.Error("expected tls-cert-bundle for DoT")
 	}
 
-	// Default config has malware+phishing RPZ, so respip module is needed.
+	// Default config has threats RPZ, so respip module is needed.
 	if !strings.Contains(content, `module-config: "respip validator iterator"`) {
 		t.Error("expected module-config with respip for RPZ")
 	}
@@ -82,14 +85,25 @@ func TestRenderUnbound_DOT(t *testing.T) {
 	if !strings.Contains(content, "@853") {
 		t.Error("expected upstream port 853 with DoT enabled")
 	}
+
+	// Default upstream 1.1.1.1 should have auth-name for certificate verification.
+	if !strings.Contains(content, "#cloudflare-dns.com") {
+		t.Error("expected TLS auth-name #cloudflare-dns.com for 1.1.1.1")
+	}
+	if !strings.Contains(content, "#dns.quad9.net") {
+		t.Error("expected TLS auth-name #dns.quad9.net for 9.9.9.9")
+	}
+
+	// TLS cert bundle should be configured.
+	if !strings.Contains(content, "tls-cert-bundle") {
+		t.Error("expected tls-cert-bundle for DoT")
+	}
 }
 
 func TestRenderUnbound_Blocklists(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()
-	cfg.DNS.BlockMalware = true
-	cfg.DNS.BlockPhishing = true
-	cfg.DNS.BlockAds = true
+	cfg.DNS.BlockThreats = true
 
 	if err := e.RenderUnbound(cfg); err != nil {
 		t.Fatalf("RenderUnbound: %v", err)
@@ -98,14 +112,8 @@ func TestRenderUnbound_Blocklists(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(e.outputDir, "unbound", "unbound.conf"))
 	content := string(data)
 
-	if !strings.Contains(content, "rpz-malware") {
-		t.Error("expected rpz-malware zone")
-	}
-	if !strings.Contains(content, "rpz-phishing") {
-		t.Error("expected rpz-phishing zone")
-	}
-	if !strings.Contains(content, "rpz-ads") {
-		t.Error("expected rpz-ads zone")
+	if !strings.Contains(content, "rpz-threats") {
+		t.Error("expected rpz-threats zone")
 	}
 
 	// RPZ zones must be top-level clauses, not inside server: block.
@@ -141,6 +149,7 @@ func TestRenderUnbound_CustomBlock(t *testing.T) {
 func TestRenderUnbound_CustomAllow(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()
+	cfg.DNS.BlockThreats = true
 	cfg.DNS.CustomAllow = []string{"allowed.com", "safe.org"}
 
 	if err := e.RenderUnbound(cfg); err != nil {
@@ -150,11 +159,51 @@ func TestRenderUnbound_CustomAllow(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(e.outputDir, "unbound", "unbound.conf"))
 	content := string(data)
 
-	if !strings.Contains(content, `local-zone: "allowed.com" transparent`) {
-		t.Error("expected local-zone transparent for allowed.com")
+	// Custom allow should use RPZ passthru zone (not local-zone transparent).
+	if !strings.Contains(content, "rpz-custom-allow") {
+		t.Error("expected rpz-custom-allow zone for custom allow domains")
 	}
-	if !strings.Contains(content, `local-zone: "safe.org" transparent`) {
-		t.Error("expected local-zone transparent for safe.org")
+	if strings.Contains(content, `local-zone: "allowed.com" transparent`) {
+		t.Error("should not use local-zone transparent; RPZ passthru is used instead")
+	}
+
+	// The passthru zone file should be written with rpz-passthru entries.
+	zoneData, err := os.ReadFile(filepath.Join(e.outputDir, "scout", "blocklists", "rpz-custom-allow.zone"))
+	if err != nil {
+		t.Fatalf("reading rpz-custom-allow.zone: %v", err)
+	}
+	zoneContent := string(zoneData)
+	if !strings.Contains(zoneContent, "allowed.com CNAME rpz-passthru.") {
+		t.Error("expected passthru entry for allowed.com in zone file")
+	}
+	if !strings.Contains(zoneContent, "safe.org CNAME rpz-passthru.") {
+		t.Error("expected passthru entry for safe.org in zone file")
+	}
+
+	// RPZ passthru zone should come BEFORE threats RPZ zone.
+	allowIdx := strings.Index(content, "rpz-custom-allow")
+	threatsIdx := strings.Index(content, "rpz-threats")
+	if allowIdx > threatsIdx {
+		t.Error("rpz-custom-allow must come before rpz-threats for correct precedence")
+	}
+}
+
+func TestRenderUnbound_CustomAllowNoBlocklists(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.DNS.BlockThreats = false
+	cfg.DNS.CustomAllow = []string{"allowed.com"}
+
+	if err := e.RenderUnbound(cfg); err != nil {
+		t.Fatalf("RenderUnbound: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "unbound", "unbound.conf"))
+	content := string(data)
+
+	// No RPZ passthru zone needed when no blocklists are active.
+	if strings.Contains(content, "rpz-custom-allow") {
+		t.Error("should not have rpz-custom-allow when no blocklists are active")
 	}
 }
 
@@ -369,9 +418,7 @@ func TestSanitizeTag(t *testing.T) {
 func TestRenderUnbound_NoBlocklists(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()
-	cfg.DNS.BlockMalware = false
-	cfg.DNS.BlockPhishing = false
-	cfg.DNS.BlockAds = false
+	cfg.DNS.BlockThreats = false
 
 	if err := e.RenderUnbound(cfg); err != nil {
 		t.Fatalf("RenderUnbound: %v", err)

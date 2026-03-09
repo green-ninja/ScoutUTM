@@ -23,12 +23,14 @@ async function handleLogout() {
 <template>
   <div class="flex h-screen bg-scout-900">
     <!-- Sidebar -->
-    <aside class="w-64 bg-scout-800 flex flex-col border-r border-scout-700">
-      <div class="px-6 py-5 border-b border-scout-700">
-        <h1 class="text-xl font-bold text-white">ScoutUTM</h1>
+    <aside class="w-64 flex flex-col border-r border-violet-500/10 bg-scout-800/60 backdrop-blur-xl">
+      <div class="px-6 py-5 border-b border-violet-500/10">
+        <h1 class="text-xl font-semibold text-white tracking-tight">
+          <span class="text-violet-400">Scout</span>UTM
+        </h1>
       </div>
 
-      <nav class="flex-1 py-4 px-3 space-y-1">
+      <nav class="flex-1 py-4 px-3 space-y-0.5">
         <NavLink to="/dashboard" label="Dashboard" />
         <NavLink to="/devices" label="Devices" />
         <NavLink to="/firewall" label="Firewall" />
@@ -40,16 +42,16 @@ async function handleLogout() {
         <NavLink to="/system" label="System" />
       </nav>
 
-      <div class="px-4 py-4 border-t border-scout-700">
-        <div class="flex items-center gap-2 text-sm text-gray-400 mb-3">
+      <div class="px-4 py-4 border-t border-violet-500/10">
+        <div class="flex items-center gap-2 text-sm text-gray-500 mb-3">
           <span
             class="w-2 h-2 rounded-full"
-            :class="connected ? 'bg-green-400' : 'bg-red-400'"
+            :class="connected ? 'bg-emerald-400' : 'bg-red-400'"
           />
           {{ connected ? 'Connected' : 'Disconnected' }}
         </div>
         <button
-          class="w-full py-2 text-sm text-gray-400 hover:text-white hover:bg-scout-700 rounded transition-colors"
+          class="w-full py-2 text-sm text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
           @click="handleLogout"
         >
           Logout

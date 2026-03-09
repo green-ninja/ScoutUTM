@@ -32,6 +32,12 @@ server:
     module-config: "respip validator iterator"
 {{- end}}
 
+{{- if .UseTLS}}
+
+    # TLS certificate bundle for upstream DoT verification
+    tls-cert-bundle: "/etc/ssl/certs/ca-certificates.crt"
+{{- end}}
+
     # Hardening
     hide-identity: yes
     hide-version: yes
@@ -47,14 +53,6 @@ server:
     cache-min-ttl: 60
     cache-max-ttl: 86400
     prefetch: yes
-
-{{- if .CustomAllow}}
-
-    # Custom allow — domain overrides (bypass RPZ)
-{{- range .CustomAllow}}
-    local-zone: "{{.}}" transparent
-{{- end}}
-{{- end}}
 
 {{- if .CustomBlock}}
 
@@ -91,13 +89,6 @@ server:
 {{- end}}
 {{- end}}
 
-{{- range .RPZZones}}
-
-rpz:
-    name: "{{.Name}}"
-    zonefile: "{{.ZoneFile}}"
-{{- end}}
-
 {{- range .ParentalRPZZones}}
 
 rpz:
@@ -106,11 +97,25 @@ rpz:
     tags: "{{.Tags}}"
 {{- end}}
 
+{{- if .CustomAllowRPZ}}
+
+rpz:
+    name: "{{.CustomAllowRPZ.Name}}"
+    zonefile: "{{.CustomAllowRPZ.ZoneFile}}"
+{{- end}}
+
+{{- range .RPZZones}}
+
+rpz:
+    name: "{{.Name}}"
+    zonefile: "{{.ZoneFile}}"
+{{- end}}
+
 forward-zone:
     name: "."
 {{- if .UseTLS}}
     forward-tls-upstream: yes
 {{- end}}
 {{- range .Upstreams}}
-    forward-addr: {{.IP}}@{{.Port}}
+    forward-addr: {{.IP}}@{{.Port}}{{if .AuthName}}#{{.AuthName}}{{end}}
 {{- end}}

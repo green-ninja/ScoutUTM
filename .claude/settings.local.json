@@ -5,7 +5,8 @@
       "Bash(/usr/local/go/bin/go test:*)",
       "Bash(/usr/local/go/bin/go build:*)",
       "WebFetch(domain:www.netify.ai)",
-      "WebFetch(domain:maclookup.app)"
+      "WebFetch(domain:maclookup.app)",
+      "Bash(grep:*)"
     ]
   }
 }

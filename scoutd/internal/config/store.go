@@ -180,6 +180,15 @@ func atomicWriteFile(path string, cfg *Config) error {
 	}
 	tmpName := tmp.Name()
 
+	// Set restrictive permissions before writing secrets (admin_hash,
+	// WireGuard private key). os.CreateTemp already uses 0600, but we
+	// set it explicitly to guard against future Go runtime changes.
+	if err := os.Chmod(tmpName, 0600); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("setting file permissions: %w", err)
+	}
+
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
@@ -193,11 +202,6 @@ func atomicWriteFile(path string, cfg *Config) error {
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("closing temp file: %w", err)
-	}
-	// Config files contain secrets (admin_hash, WireGuard private key).
-	if err := os.Chmod(tmpName, 0600); err != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("setting file permissions: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)

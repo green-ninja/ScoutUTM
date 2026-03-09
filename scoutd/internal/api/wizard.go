@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/scoututm/scoutd/internal/auth"
+	"github.com/scoututm/scoutd/internal/blocklist"
 	"github.com/scoututm/scoutd/internal/config"
 )
 
@@ -23,6 +25,10 @@ var (
 
 func (s *Server) handleWizardStep(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	if cfg.System.SetupDone {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "setup already complete"})
 		return
@@ -76,6 +82,17 @@ func (s *Server) wizardStep1(w http.ResponseWriter, r *http.Request) {
 
 // Step 2: Set admin password.
 func (s *Server) wizardStep2(w http.ResponseWriter, r *http.Request) {
+	// Prevent replay: if admin hash is already set, reject.
+	cur := s.Config.Current()
+	if cur == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
+	if cur.System.AdminHash != "" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "admin password already set"})
+		return
+	}
+
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -87,6 +104,10 @@ func (s *Server) wizardStep2(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 10 characters"})
 		return
 	}
+	if len(req.Password) > 72 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must not exceed 72 bytes"})
+		return
+	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
@@ -94,9 +115,8 @@ func (s *Server) wizardStep2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 	cfg.System.AdminHash = hash
@@ -107,12 +127,16 @@ func (s *Server) wizardStep2(w http.ResponseWriter, r *http.Request) {
 	}
 
 	markComplete(2)
+	auditLog(r, "wizard_set_password")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // Step 3: Network detection — return detected interfaces.
 func (s *Server) wizardStep3(w http.ResponseWriter, r *http.Request) {
-	cfg := s.Config.Current()
+	cfg := s.requireConfig(w)
+	if cfg == nil {
+		return
+	}
 
 	type ifaceInfo struct {
 		Name string `json:"name"`
@@ -148,9 +172,8 @@ func (s *Server) wizardStep4(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -176,20 +199,17 @@ func (s *Server) wizardStep4(w http.ResponseWriter, r *http.Request) {
 // Step 5: Security defaults.
 func (s *Server) wizardStep5(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		IDSEnabled    *bool `json:"ids_enabled,omitempty"`
-		IDSMode       string `json:"ids_mode,omitempty"`
-		BlockMalware  *bool `json:"block_malware,omitempty"`
-		BlockPhishing *bool `json:"block_phishing,omitempty"`
-		BlockAds      *bool `json:"block_ads,omitempty"`
+		IDSEnabled   *bool  `json:"ids_enabled,omitempty"`
+		IDSMode      string `json:"ids_mode,omitempty"`
+		BlockThreats *bool  `json:"block_threats,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -199,14 +219,18 @@ func (s *Server) wizardStep5(w http.ResponseWriter, r *http.Request) {
 	if req.IDSMode == "ids" || req.IDSMode == "ips" {
 		cfg.IDS.Mode = req.IDSMode
 	}
-	if req.BlockMalware != nil {
-		cfg.DNS.BlockMalware = *req.BlockMalware
+	if req.BlockThreats != nil {
+		cfg.DNS.BlockThreats = *req.BlockThreats
 	}
-	if req.BlockPhishing != nil {
-		cfg.DNS.BlockPhishing = *req.BlockPhishing
-	}
-	if req.BlockAds != nil {
-		cfg.DNS.BlockAds = *req.BlockAds
+
+	// Fetch threats blocklist if being enabled.
+	if cfg.DNS.BlockThreats {
+		n, err := blocklist.FetchThreatsBlocklist("")
+		if err != nil {
+			log.Printf("threats blocklist fetch: %v", err)
+		} else {
+			log.Printf("threats blocklist: loaded %d domains", n)
+		}
 	}
 
 	if err := s.applyConfig(cfg); err != nil {
@@ -229,9 +253,8 @@ func (s *Server) wizardStep6(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -262,9 +285,8 @@ func (s *Server) wizardStep6(w http.ResponseWriter, r *http.Request) {
 
 // Step 7: Apply — mark setup done.
 func (s *Server) wizardStep7(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
 	}
 
@@ -276,6 +298,7 @@ func (s *Server) wizardStep7(w http.ResponseWriter, r *http.Request) {
 	}
 
 	markComplete(7)
+	auditLog(r, "wizard_setup_complete")
 
 	// Reset wizard progress.
 	wizardMu.Lock()

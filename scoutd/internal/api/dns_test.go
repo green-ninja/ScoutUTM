@@ -45,14 +45,12 @@ func TestPutDNS(t *testing.T) {
 	token := loginAndGetToken(t, srv, "test")
 
 	update := config.DNSConfig{
-		Upstream:      []string{"8.8.8.8", "8.8.4.4"},
-		UseDOT:        true,
-		BlockMalware:  true,
-		BlockPhishing: false,
-		BlockAds:      true,
-		QueryLogging:  false,
-		CustomBlock:   []string{},
-		CustomAllow:   []string{},
+		Upstream:     []string{"8.8.8.8", "8.8.4.4"},
+		UseDOT:       true,
+		BlockThreats: true,
+		QueryLogging: false,
+		CustomBlock:  []string{},
+		CustomAllow:  []string{},
 	}
 	body, _ := json.Marshal(update)
 
@@ -72,9 +70,6 @@ func TestPutDNS(t *testing.T) {
 	}
 	if !cfg.DNS.UseDOT {
 		t.Error("expected use_dot to be true")
-	}
-	if !cfg.DNS.BlockAds {
-		t.Error("expected block_ads to be true")
 	}
 	if cfg.DNS.QueryLogging {
 		t.Error("expected query_logging to be false")
@@ -134,12 +129,11 @@ func TestPutDNS_CustomBlockDomains(t *testing.T) {
 	token := loginAndGetToken(t, srv, "test")
 
 	update := config.DNSConfig{
-		Upstream:      []string{"1.1.1.1"},
-		BlockMalware:  true,
-		BlockPhishing: true,
-		QueryLogging:  true,
-		CustomBlock:   []string{"badsite.com", "malware.org"},
-		CustomAllow:   []string{},
+		Upstream:     []string{"1.1.1.1"},
+		BlockThreats: true,
+		QueryLogging: true,
+		CustomBlock:  []string{"badsite.com", "malware.org"},
+		CustomAllow:  []string{},
 	}
 	body, _ := json.Marshal(update)
 
@@ -174,31 +168,6 @@ func TestGetDNSQueryLog_NotImplemented(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("GET /dns/query-log: status = %d, want 200", w.Code)
-	}
-}
-
-func TestPutDNS_DOTAndDOHMutuallyExclusive(t *testing.T) {
-	srv, cleanup := testServer(t)
-	defer cleanup()
-	setAdminPassword(t, srv, "test")
-	token := loginAndGetToken(t, srv, "test")
-
-	update := config.DNSConfig{
-		Upstream:    []string{"1.1.1.1"},
-		UseDOT:      true,
-		UseDOH:      true,
-		CustomBlock: []string{},
-		CustomAllow: []string{},
-	}
-	body, _ := json.Marshal(update)
-
-	req := httptest.NewRequest("PUT", "/api/v1/dns", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-	srv.Router().ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Errorf("PUT /dns DoT+DoH: status = %d, want 422", w.Code)
 	}
 }
 

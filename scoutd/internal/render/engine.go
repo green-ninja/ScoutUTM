@@ -76,6 +76,12 @@ func (e *Engine) RenderDaemons(cfg *config.Config, daemons []string) error {
 	return nil
 }
 
+// sensitiveConfigs lists output files that contain secrets (e.g. private keys)
+// and must have restrictive permissions (0600).
+var sensitiveConfigs = map[string]bool{
+	"wireguard.conf": true,
+}
+
 // renderTemplate parses a template file, executes it with data, and writes atomically.
 func (e *Engine) renderTemplate(tmplName, outputPath string, data interface{}) error {
 	tmplPath := filepath.Join(e.templateDir, tmplName)
@@ -112,10 +118,20 @@ func (e *Engine) renderTemplate(tmplName, outputPath string, data interface{}) e
 		os.Remove(tmpName)
 		return fmt.Errorf("closing temp file: %w", err)
 	}
+	// Enforce restrictive permissions on configs containing secrets
+	// before rename so the file is never world-readable on disk.
+	if sensitiveConfigs[filepath.Base(outputPath)] {
+		if err := os.Chmod(tmpName, 0600); err != nil {
+			os.Remove(tmpName)
+			return fmt.Errorf("setting file permissions: %w", err)
+		}
+	}
+
 	if err := os.Rename(tmpName, outputPath); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
+
 	return nil
 }
 

@@ -23,9 +23,7 @@ const lanAddress = ref('192.168.1.1/24')
 // Step 5: Security
 const idsEnabled = ref(true)
 const idsMode = ref('ids')
-const blockMalware = ref(true)
-const blockPhishing = ref(true)
-const blockAds = ref(false)
+const blockThreats = ref(true)
 
 // Step 6: VLANs (optional, simplified)
 const skipVLAN = ref(true)
@@ -45,7 +43,7 @@ function passwordStrength(pw: string): { label: string; color: string } {
   if (pw.length < 10) return { label: 'Too short', color: 'bg-red-500' }
   if (pw.length < 14) return { label: 'Fair', color: 'bg-yellow-500' }
   if (pw.length >= 14 && /[A-Z]/.test(pw) && /[0-9]/.test(pw)) return { label: 'Strong', color: 'bg-green-500' }
-  return { label: 'Good', color: 'bg-blue-500' }
+  return { label: 'Good', color: 'bg-violet-500' }
 }
 
 async function next() {
@@ -85,9 +83,7 @@ async function next() {
         await wizardStep(5, {
           ids_enabled: idsEnabled.value,
           ids_mode: idsMode.value,
-          block_malware: blockMalware.value,
-          block_phishing: blockPhishing.value,
-          block_ads: blockAds.value,
+          block_threats: blockThreats.value,
         })
         break
       }
@@ -161,7 +157,7 @@ function back() {
         <div v-if="step === 3" class="space-y-4">
           <h2 class="text-xl font-bold text-white">Network Interfaces</h2>
           <p class="text-gray-400 text-sm">These network interfaces were detected on your device.</p>
-          <div v-if="interfaces.length" class="bg-scout-800 rounded-lg overflow-hidden">
+          <div v-if="interfaces.length" class="glass rounded-xl overflow-hidden">
             <table class="w-full text-sm">
               <thead>
                 <tr class="text-left text-gray-400 border-b border-scout-700">
@@ -211,16 +207,8 @@ function back() {
               </select>
             </div>
             <label class="flex items-center gap-3 text-sm text-gray-300">
-              <input v-model="blockMalware" type="checkbox" class="rounded bg-scout-700 border-scout-600" />
-              Block Malware Domains
-            </label>
-            <label class="flex items-center gap-3 text-sm text-gray-300">
-              <input v-model="blockPhishing" type="checkbox" class="rounded bg-scout-700 border-scout-600" />
-              Block Phishing Domains
-            </label>
-            <label class="flex items-center gap-3 text-sm text-gray-300">
-              <input v-model="blockAds" type="checkbox" class="rounded bg-scout-700 border-scout-600" />
-              Block Ads
+              <input v-model="blockThreats" type="checkbox" class="rounded bg-scout-700 border-scout-600" />
+              Block potentially dangerous and unwanted content
             </label>
           </div>
         </div>
@@ -239,11 +227,11 @@ function back() {
         <div v-if="step === 7" class="space-y-4">
           <h2 class="text-xl font-bold text-white">Review &amp; Apply</h2>
           <p class="text-gray-400 text-sm">Your ScoutUTM is ready to be configured with the settings above.</p>
-          <div class="bg-scout-800 rounded-lg p-4 space-y-2 text-sm">
+          <div class="glass rounded-xl p-4 space-y-2 text-sm">
             <p class="text-gray-400">Admin password: <span class="text-green-400">Set</span></p>
             <p class="text-gray-400">LAN: <span class="text-white">{{ lanAddress }}</span></p>
             <p class="text-gray-400">IDS: <span class="text-white">{{ idsEnabled ? idsMode.toUpperCase() : 'Disabled' }}</span></p>
-            <p class="text-gray-400">DNS Filtering: <span class="text-white">Malware={{ blockMalware }}, Phishing={{ blockPhishing }}, Ads={{ blockAds }}</span></p>
+            <p class="text-gray-400">DNS Filtering: <span class="text-white">{{ blockThreats ? 'Enabled' : 'Disabled' }}</span></p>
           </div>
           <p class="text-gray-500 text-xs">Click "Apply" to finalize setup and start protecting your network.</p>
         </div>
@@ -260,7 +248,7 @@ function back() {
           </button>
           <div v-else />
           <button
-            class="px-6 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded transition-colors disabled:opacity-50"
+            class="px-6 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded transition-colors disabled:opacity-50"
             :disabled="loading"
             @click="next"
           >

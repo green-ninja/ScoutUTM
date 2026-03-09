@@ -34,9 +34,14 @@ async function submit() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-scout-900">
-    <div class="w-full max-w-sm bg-scout-800 rounded-lg shadow-xl p-8">
-      <h1 class="text-2xl font-bold text-center text-white mb-8">ScoutUTM</h1>
+  <div class="min-h-screen flex items-center justify-center bg-scout-900 relative overflow-hidden">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,rgba(139,92,246,0.06),transparent_60%)]" />
+
+    <div class="relative w-full max-w-sm glass rounded-xl p-8">
+      <h1 class="text-2xl font-semibold text-center text-white mb-1">
+        <span class="text-violet-400">Scout</span>UTM
+      </h1>
+      <p class="text-center text-gray-500 text-sm mb-8">Sign in to your dashboard</p>
       <form @submit.prevent="submit">
         <label class="block text-sm text-gray-400 mb-2" for="password">Password</label>
         <input
@@ -44,14 +49,14 @@ async function submit() {
           v-model="password"
           type="password"
           autocomplete="current-password"
-          class="w-full px-4 py-2 bg-scout-700 border border-scout-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-scout-accent"
+          class="w-full px-4 py-2.5 bg-scout-700/50 border border-violet-500/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-violet-500/30 transition-colors"
           placeholder="Enter admin password"
           :disabled="loading"
         />
         <p v-if="error" class="mt-2 text-sm text-red-400">{{ error }}</p>
         <button
           type="submit"
-          class="w-full mt-6 py-2 bg-scout-accent hover:bg-blue-600 text-white font-medium rounded transition-colors disabled:opacity-50"
+          class="w-full mt-6 py-2.5 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
           :disabled="loading || !password"
         >
           {{ loading ? 'Signing in...' : 'Sign In' }}

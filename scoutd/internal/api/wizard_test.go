@@ -47,6 +47,7 @@ func TestWizard_Step2_Password(t *testing.T) {
 
 	cfg := srv.Config.Current()
 	cfg.System.SetupDone = false
+	cfg.System.AdminHash = "" // Clear hash so wizard step 2 can set it.
 	srv.Config.SetCurrent(cfg)
 	srv.Config.Save()
 
@@ -135,6 +136,7 @@ func TestWizard_FullFlow(t *testing.T) {
 
 	cfg := srv.Config.Current()
 	cfg.System.SetupDone = false
+	cfg.System.AdminHash = "" // Clear hash so wizard step 2 can set it.
 	srv.Config.SetCurrent(cfg)
 	srv.Config.Save()
 

@@ -75,7 +75,7 @@ async function deleteVLAN(id: number) {
 
       <!-- Interfaces -->
       <div v-if="activeTab === 'interfaces'">
-        <div class="bg-scout-800 rounded-lg overflow-hidden">
+        <div class="glass rounded-xl overflow-hidden">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-400 border-b border-scout-700">
@@ -101,7 +101,7 @@ async function deleteVLAN(id: number) {
 
       <!-- Zones -->
       <div v-if="activeTab === 'zones'">
-        <div class="bg-scout-800 rounded-lg overflow-hidden">
+        <div class="glass rounded-xl overflow-hidden">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-400 border-b border-scout-700">
@@ -140,11 +140,11 @@ async function deleteVLAN(id: number) {
       <!-- VLANs -->
       <div v-if="activeTab === 'vlans'">
         <div class="flex justify-end mb-4">
-          <button class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded" @click="showAddVLAN = true">
+          <button class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded" @click="showAddVLAN = true">
             Add VLAN
           </button>
         </div>
-        <div class="bg-scout-800 rounded-lg overflow-hidden">
+        <div class="glass rounded-xl overflow-hidden">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-400 border-b border-scout-700">
@@ -211,7 +211,7 @@ async function deleteVLAN(id: number) {
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white" @click="showAddVLAN = false">Cancel</button>
-          <button type="submit" class="px-4 py-2 bg-scout-accent hover:bg-blue-600 text-white text-sm rounded">Add</button>
+          <button type="submit" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded">Add</button>
         </div>
       </form>
     </Modal>

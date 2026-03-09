@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/scoututm/scoutd/internal/blocklist"
 	"github.com/scoututm/scoutd/internal/config"
 	"github.com/scoututm/scoutd/internal/dnslog"
 )
@@ -17,6 +19,10 @@ func dnsRoutes(r chi.Router, s *Server) {
 
 func (s *Server) handleGetDNS(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config.Current()
+	if cfg == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg.DNS)
 }
 
@@ -39,10 +45,20 @@ func (s *Server) handlePutDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.Config.Current().DeepCopy()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	cfg := s.requireConfig(w)
+	if cfg == nil {
 		return
+	}
+
+	// If BlockThreats is being enabled, fetch the blocklist before applying
+	// so Unbound has a populated zone file to load.
+	if req.BlockThreats && !cfg.DNS.BlockThreats {
+		n, err := blocklist.FetchThreatsBlocklist("")
+		if err != nil {
+			log.Printf("threats blocklist fetch: %v", err)
+		} else {
+			log.Printf("threats blocklist: loaded %d domains", n)
+		}
 	}
 
 	cfg.DNS = req
@@ -51,6 +67,7 @@ func (s *Server) handlePutDNS(w http.ResponseWriter, r *http.Request) {
 		handleApplyError(w, err)
 		return
 	}
+	auditLog(r, "dns_config_update")
 
 	writeJSON(w, http.StatusOK, cfg.DNS)
 }

@@ -69,6 +69,25 @@ func TestCleanup(t *testing.T) {
 	}
 }
 
+func TestRevokeAllExcept(t *testing.T) {
+	m := NewSessionManager()
+	t1, _ := m.Create()
+	t2, _ := m.Create()
+	t3, _ := m.Create()
+
+	m.RevokeAllExcept(t2)
+
+	if m.Validate(t1) {
+		t.Error("t1 should be revoked")
+	}
+	if !m.Validate(t2) {
+		t.Error("t2 should survive RevokeAllExcept")
+	}
+	if m.Validate(t3) {
+		t.Error("t3 should be revoked")
+	}
+}
+
 func TestRateLimiter_AllowsInitial(t *testing.T) {
 	rl := NewLoginRateLimiter()
 	if !rl.Allow("192.168.1.10") {

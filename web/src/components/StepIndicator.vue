@@ -12,10 +12,10 @@ defineProps<{
         class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors"
         :class="
           i < current
-            ? 'bg-green-600 text-white'
+            ? 'bg-emerald-600 text-white'
             : i === current
-              ? 'bg-scout-accent text-white'
-              : 'bg-scout-700 text-gray-400'
+              ? 'bg-violet-500 text-white'
+              : 'bg-scout-700 text-gray-500'
         "
       >
         <span v-if="i < current">&#10003;</span>
@@ -24,7 +24,7 @@ defineProps<{
       <div
         v-if="i < steps"
         class="w-8 h-0.5 transition-colors"
-        :class="i < current ? 'bg-green-600' : 'bg-scout-700'"
+        :class="i < current ? 'bg-emerald-600' : 'bg-scout-700'"
       />
     </template>
   </div>

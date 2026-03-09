@@ -2,6 +2,7 @@ Vagrant.configure("2") do |config|
   # ── UTM Appliance VM (primary) ──
   config.vm.define "utm", primary: true do |utm|
     utm.vm.box = "generic/alpine319"
+    utm.vm.box_version = "~> 4.3.0"
     utm.vm.hostname = "scoututm-dev"
 
     utm.vm.provider "virtualbox" do |vb|
@@ -29,6 +30,7 @@ Vagrant.configure("2") do |config|
   # ── LAN Client VM ──
   config.vm.define "client" do |client|
     client.vm.box = "generic/alpine319"
+    client.vm.box_version = "~> 4.3.0"
     client.vm.hostname = "scout-client"
 
     client.vm.provider "virtualbox" do |vb|

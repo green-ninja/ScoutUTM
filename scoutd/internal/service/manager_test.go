@@ -65,3 +65,11 @@ func TestVMManager_HealthCheck_NftablesSkipped(t *testing.T) {
 		t.Errorf("HealthCheck nftables: %v", err)
 	}
 }
+
+func TestSuricataUpdate_StubAll(t *testing.T) {
+	m := NewManager(true)
+	// StubAll mode should not execute anything — just log.
+	if err := m.SuricataUpdate(); err != nil {
+		t.Errorf("SuricataUpdate: %v", err)
+	}
+}
