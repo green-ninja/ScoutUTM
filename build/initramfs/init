@@ -1,0 +1,167 @@
+#!/bin/busybox sh
+# ScoutOS initramfs — dm-verity verification + OverlayFS boot.
+#
+# Placeholders substituted at build time by tools/build-image.sh:
+#   @ROOTHASH@    — dm-verity root hash
+#   @HASHOFFSET@  — byte offset of verity hash tree in partition
+set -e
+
+ROOTHASH="@ROOTHASH@"
+HASHOFFSET="@HASHOFFSET@"
+
+# ──────────────────────────────────────────────
+# Mount essential pseudo-filesystems
+# ──────────────────────────────────────────────
+/bin/busybox mkdir -p /proc /sys /dev /mnt/lower /mnt/upper /mnt/root /tmp /run
+/bin/busybox mount -t proc     none /proc
+/bin/busybox mount -t sysfs    none /sys
+/bin/busybox mount -t devtmpfs none /dev
+
+# Create busybox symlinks for all applets.
+/bin/busybox --install -s /bin
+/bin/busybox --install -s /sbin
+
+echo ""
+echo "ScoutOS initramfs starting..."
+echo ""
+
+# ──────────────────────────────────────────────
+# Load kernel modules needed for boot
+# ──────────────────────────────────────────────
+for mod in dm-mod dm-bufio dm-verity squashfs overlay \
+           nvme-core nvme fat vfat nls_cp437 nls_iso8859-1 \
+           ext4 jbd2 mbcache crc16 crc32c_generic sha256_generic; do
+    modprobe "$mod" 2>/dev/null || true
+done
+
+# ──────────────────────────────────────────────
+# Parse kernel command line
+# ──────────────────────────────────────────────
+ROOT_DEV=""
+RAUC_SLOT=""
+RESCUE=""
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        root=*)        ROOT_DEV="${arg#root=}" ;;
+        rauc.slot=*)   RAUC_SLOT="${arg#rauc.slot=}" ;;
+        scout.rescue=*) RESCUE="${arg#scout.rescue=}" ;;
+    esac
+done
+
+# ──────────────────────────────────────────────
+# Resolve root device (PARTUUID → /dev/...)
+# ──────────────────────────────────────────────
+case "$ROOT_DEV" in
+    PARTUUID=*)
+        PARTUUID="${ROOT_DEV#PARTUUID=}"
+        ROOT_DEV=""
+        for _try in $(seq 1 15); do
+            ROOT_DEV=$(blkid -t "PARTUUID=$PARTUUID" -o device 2>/dev/null) && break
+            echo "Waiting for root device (PARTUUID=$PARTUUID)... ${_try}/15"
+            sleep 1
+        done
+        if [ -z "$ROOT_DEV" ]; then
+            echo "ERROR: Cannot find root device PARTUUID=$PARTUUID"
+            echo "Available block devices:"
+            blkid 2>/dev/null || true
+            exec sh
+        fi
+        ;;
+esac
+
+[ -n "$ROOT_DEV" ] || { echo "ERROR: No root= on kernel command line"; exec sh; }
+echo "Root device: $ROOT_DEV (slot: ${RAUC_SLOT:-?})"
+
+# ──────────────────────────────────────────────
+# dm-verity: verify rootfs integrity
+# ──────────────────────────────────────────────
+if [ -n "$ROOTHASH" ]; then
+    echo "Verifying rootfs integrity (dm-verity)..."
+    if veritysetup open --restart-on-corruption \
+            "$ROOT_DEV" scout-root "$ROOT_DEV" "$ROOTHASH" \
+            --hash-offset="$HASHOFFSET" 2>&1; then
+        SQFS_DEV="/dev/mapper/scout-root"
+        echo "dm-verity: OK"
+    else
+        echo ""
+        echo "*** ScoutOS boot failed ***"
+        echo "Error: dm-verity verification failed for $ROOT_DEV"
+        echo "This may indicate a corrupted firmware image."
+        echo ""
+        echo "Recovery options:"
+        echo "  1. Reboot to try the alternate slot (type: reboot)"
+        echo "  2. Insert USB recovery drive and reboot"
+        echo "  3. Use this shell to inspect partitions"
+        echo ""
+        echo "Type 'help' for available commands."
+        exec sh
+    fi
+else
+    echo "dm-verity not configured, mounting SquashFS directly"
+    SQFS_DEV="$ROOT_DEV"
+fi
+
+# ──────────────────────────────────────────────
+# Mount SquashFS (read-only lower layer)
+# ──────────────────────────────────────────────
+mount -t squashfs -o ro "$SQFS_DEV" /mnt/lower || {
+    echo "*** ScoutOS boot failed ***"
+    echo "Error: failed to mount SquashFS from $SQFS_DEV"
+    exec sh
+}
+echo "SquashFS mounted"
+
+# ──────────────────────────────────────────────
+# OverlayFS (tmpfs upper — volatile, lost on reboot)
+# ──────────────────────────────────────────────
+mount -t tmpfs -o size=256m tmpfs /mnt/upper
+mkdir -p /mnt/upper/upper /mnt/upper/work
+mount -t overlay overlay \
+    -o lowerdir=/mnt/lower,upperdir=/mnt/upper/upper,workdir=/mnt/upper/work \
+    /mnt/root || {
+    echo "Error: failed to mount OverlayFS"
+    exec sh
+}
+echo "OverlayFS mounted"
+
+# ──────────────────────────────────────────────
+# Mount persistent partitions (by filesystem label)
+# ──────────────────────────────────────────────
+# Config partition
+CONFIG_DEV=$(findfs LABEL=scout-config 2>/dev/null || true)
+if [ -n "$CONFIG_DEV" ]; then
+    mkdir -p /mnt/root/etc/scout
+    mount -t ext4 -o noexec,nosuid,nodev "$CONFIG_DEV" /mnt/root/etc/scout || \
+        echo "Warning: config partition mount failed"
+else
+    echo "Warning: config partition (LABEL=scout-config) not found"
+fi
+
+# Data partition
+DATA_DEV=$(findfs LABEL=scout-data 2>/dev/null || true)
+if [ -n "$DATA_DEV" ]; then
+    mkdir -p /mnt/root/var/lib/scout
+    mount -t ext4 -o noexec,nosuid,nodev "$DATA_DEV" /mnt/root/var/lib/scout || \
+        echo "Warning: data partition mount failed"
+else
+    echo "Warning: data partition (LABEL=scout-data) not found"
+fi
+
+# ESP (for RAUC/GRUB access at runtime)
+ESP_DEV=$(findfs LABEL=SCOUT-ESP 2>/dev/null || true)
+if [ -n "$ESP_DEV" ]; then
+    mkdir -p /mnt/root/boot/efi
+    mount -t vfat "$ESP_DEV" /mnt/root/boot/efi || \
+        echo "Warning: ESP mount failed"
+fi
+
+# ──────────────────────────────────────────────
+# Switch to real root
+# ──────────────────────────────────────────────
+echo "Switching to real root..."
+
+# Move /dev so OpenRC can use it.
+mount --move /dev /mnt/root/dev 2>/dev/null || true
+umount /proc /sys 2>/dev/null || true
+
+exec switch_root /mnt/root /sbin/init

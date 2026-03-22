@@ -5,30 +5,40 @@ import StatCard from '@/components/StatCard.vue'
 import ThroughputChart from '@/components/ThroughputChart.vue'
 import * as vpnApi from '@/api/vpn'
 import * as dnsApi from '@/api/dns'
-import type { WireGuardConfig, DNSConfig, DNSQueryEntry } from '@/api/types'
+import { getConnections } from '@/api/system'
+import type { WireGuardConfig, DNSConfig, DNSQueryEntry, Connection } from '@/api/types'
 
 const stats = useStatsStore()
 
 const vpn = ref<WireGuardConfig | null>(null)
 const dns = ref<DNSConfig | null>(null)
 const queryLog = ref<DNSQueryEntry[]>([])
+const connections = ref<Connection[]>([])
 const summaryError = ref(false)
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
   try {
-    const [v, d, q] = await Promise.all([vpnApi.getWireGuard(), dnsApi.getDns(), dnsApi.getQueryLog()])
+    const [v, d, q, c] = await Promise.all([
+      vpnApi.getWireGuard(),
+      dnsApi.getDns(),
+      dnsApi.getQueryLog(),
+      getConnections(),
+    ])
     vpn.value = v
     dns.value = d
     queryLog.value = q.slice(-20)
+    connections.value = c
   } catch {
     summaryError.value = true
   }
 
   refreshTimer = setInterval(async () => {
     try {
-      queryLog.value = (await dnsApi.getQueryLog()).slice(-20)
+      const [q, c] = await Promise.all([dnsApi.getQueryLog(), getConnections()])
+      queryLog.value = q.slice(-20)
+      connections.value = c
     } catch { /* ignore */ }
   }, 30000)
 })
@@ -63,6 +73,13 @@ function formatTime(ts: string): string {
   const d = new Date(ts)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`
+  return `${bytes} B`
+}
 </script>
 
 <template>
@@ -92,8 +109,8 @@ function formatTime(ts: string): string {
 
     <!-- Throughput chart -->
     <div class="glass rounded-xl p-4 mb-6">
-      <h3 class="text-sm font-medium text-gray-400 mb-3">WAN Throughput</h3>
-      <ThroughputChart :history="stats.history" />
+      <h3 class="text-sm font-medium text-gray-400 mb-3">Traffic Throughput</h3>
+      <ThroughputChart :latest="stats.latest" />
     </div>
 
     <!-- Summary cards -->
@@ -129,37 +146,73 @@ function formatTime(ts: string): string {
       </div>
     </div>
 
-    <!-- Recent DNS Queries -->
-    <div class="glass rounded-xl p-4">
-      <h3 class="text-sm font-medium text-gray-400 mb-3">Recent DNS Queries</h3>
-      <div v-if="queryLog.length" class="overflow-x-auto">
-        <table class="w-full text-sm text-left">
-          <thead>
-            <tr class="text-gray-500 border-b border-scout-700">
-              <th class="pb-2 font-medium">Time</th>
-              <th class="pb-2 font-medium">Device</th>
-              <th class="pb-2 font-medium">Domain</th>
-              <th class="pb-2 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(entry, i) in queryLog" :key="i" class="border-b border-scout-700 last:border-0">
-              <td class="py-2 text-gray-400 whitespace-nowrap">{{ formatTime(entry.timestamp) }}</td>
-              <td class="py-2 text-white">{{ entry.device_name || entry.device_ip }}</td>
-              <td class="py-2 text-white font-mono text-xs">{{ entry.domain }}</td>
-              <td class="py-2">
-                <span
-                  class="px-2 py-0.5 rounded text-xs font-medium"
-                  :class="entry.action === 'block' ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'"
-                >
-                  {{ entry.action === 'block' ? 'Blocked' : 'Allowed' }}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <!-- Recent DNS Queries + IP Connections side by side -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="glass rounded-xl p-4">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">Recent DNS Queries</h3>
+        <div v-if="queryLog.length" class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead>
+              <tr class="text-gray-500 border-b border-scout-700">
+                <th class="pb-2 font-medium">Time</th>
+                <th class="pb-2 font-medium">Device</th>
+                <th class="pb-2 font-medium">Domain</th>
+                <th class="pb-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(entry, i) in queryLog" :key="i" class="border-b border-scout-700 last:border-0">
+                <td class="py-2 text-gray-400 whitespace-nowrap">{{ formatTime(entry.timestamp) }}</td>
+                <td class="py-2 text-white">{{ entry.device_name || entry.device_ip }}</td>
+                <td class="py-2 text-white font-mono text-xs">{{ entry.domain }}</td>
+                <td class="py-2">
+                  <span
+                    class="px-2 py-0.5 rounded text-xs font-medium"
+                    :class="entry.action === 'block' ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'"
+                  >
+                    {{ entry.action === 'block' ? 'Blocked' : 'Allowed' }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="text-gray-500 text-sm">No queries logged</p>
       </div>
-      <p v-else class="text-gray-500 text-sm">No queries logged</p>
+
+      <div class="glass rounded-xl p-4">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">IP Connections</h3>
+        <div v-if="connections.length" class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead>
+              <tr class="text-gray-500 border-b border-scout-700">
+                <th class="pb-2 font-medium">Proto</th>
+                <th class="pb-2 font-medium">Source</th>
+                <th class="pb-2 font-medium">Destination</th>
+                <th class="pb-2 font-medium">State</th>
+                <th class="pb-2 font-medium text-right">Bytes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(conn, i) in connections" :key="i" class="border-b border-scout-700 last:border-0">
+                <td class="py-2 text-gray-400 uppercase">{{ conn.proto }}</td>
+                <td class="py-2 text-white font-mono text-xs">{{ conn.src_ip }}{{ conn.src_port ? ':' + conn.src_port : '' }}</td>
+                <td class="py-2 text-white font-mono text-xs">{{ conn.dst_ip }}{{ conn.dst_port ? ':' + conn.dst_port : '' }}</td>
+                <td class="py-2">
+                  <span
+                    class="px-2 py-0.5 rounded text-xs font-medium"
+                    :class="conn.state === 'ESTABLISHED' ? 'bg-green-900 text-green-300' : 'bg-scout-700 text-gray-400'"
+                  >
+                    {{ conn.state || '-' }}
+                  </span>
+                </td>
+                <td class="py-2 text-gray-400 text-right whitespace-nowrap">{{ formatSize(conn.bytes) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="text-gray-500 text-sm">No connections</p>
+      </div>
     </div>
   </div>
 </template>

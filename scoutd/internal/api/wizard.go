@@ -41,14 +41,17 @@ func (s *Server) handleWizardStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Guard: steps 2-7 require previous step completed.
+	// Hold wizardMu for the entire step execution to prevent race
+	// conditions (e.g. two concurrent step-2 requests both passing
+	// the prerequisite check and both setting the admin password).
 	wizardMu.Lock()
+	defer wizardMu.Unlock()
+
+	// Guard: steps 2-7 require previous step completed.
 	if step > 1 && !wizardComplete[step-1] {
-		wizardMu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "previous step not completed"})
 		return
 	}
-	wizardMu.Unlock()
 
 	switch step {
 	case 1:
@@ -68,10 +71,9 @@ func (s *Server) handleWizardStep(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// markComplete marks a wizard step as done. Caller must hold wizardMu.
 func markComplete(step int) {
-	wizardMu.Lock()
 	wizardComplete[step] = true
-	wizardMu.Unlock()
 }
 
 // Step 1: Welcome — no-op.
@@ -80,19 +82,8 @@ func (s *Server) wizardStep1(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// Step 2: Set admin password.
+// Step 2: Validate admin password (stored client-side until step 7).
 func (s *Server) wizardStep2(w http.ResponseWriter, r *http.Request) {
-	// Prevent replay: if admin hash is already set, reject.
-	cur := s.Config.Current()
-	if cur == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config not loaded"})
-		return
-	}
-	if cur.System.AdminHash != "" {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "admin password already set"})
-		return
-	}
-
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -109,25 +100,7 @@ func (s *Server) wizardStep2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-
-	cfg := s.requireConfig(w)
-	if cfg == nil {
-		return
-	}
-	cfg.System.AdminHash = hash
-
-	if err := s.applyConfig(cfg); err != nil {
-		handleApplyError(w, err)
-		return
-	}
-
 	markComplete(2)
-	auditLog(r, "wizard_set_password")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -223,14 +196,18 @@ func (s *Server) wizardStep5(w http.ResponseWriter, r *http.Request) {
 		cfg.DNS.BlockThreats = *req.BlockThreats
 	}
 
-	// Fetch threats blocklist if being enabled.
+	// Fetch threats blocklist asynchronously if being enabled.
+	// The download can take 30s+ (large hosts file with retries) which
+	// would block the wizard response and trigger a WriteTimeout.
 	if cfg.DNS.BlockThreats {
-		n, err := blocklist.FetchThreatsBlocklist("")
-		if err != nil {
-			log.Printf("threats blocklist fetch: %v", err)
-		} else {
-			log.Printf("threats blocklist: loaded %d domains", n)
-		}
+		go func() {
+			n, err := blocklist.FetchThreatsBlocklist("")
+			if err != nil {
+				log.Printf("threats blocklist fetch: %v", err)
+			} else {
+				log.Printf("threats blocklist: loaded %d domains", n)
+			}
+		}()
 	}
 
 	if err := s.applyConfig(cfg); err != nil {
@@ -283,13 +260,36 @@ func (s *Server) wizardStep6(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// Step 7: Apply — mark setup done.
+// Step 7: Apply — set admin password and mark setup done.
 func (s *Server) wizardStep7(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if len(req.Password) < 10 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 10 characters"})
+		return
+	}
+	if len(req.Password) > 72 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must not exceed 72 bytes"})
+		return
+	}
+
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
 	cfg := s.requireConfig(w)
 	if cfg == nil {
 		return
 	}
 
+	cfg.System.AdminHash = hash
 	cfg.System.SetupDone = true
 
 	if err := s.applyConfig(cfg); err != nil {
@@ -298,12 +298,11 @@ func (s *Server) wizardStep7(w http.ResponseWriter, r *http.Request) {
 	}
 
 	markComplete(7)
+	auditLog(r, "wizard_set_password")
 	auditLog(r, "wizard_setup_complete")
 
-	// Reset wizard progress.
-	wizardMu.Lock()
+	// Reset wizard progress. Caller holds wizardMu.
 	wizardComplete = make(map[int]bool)
-	wizardMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

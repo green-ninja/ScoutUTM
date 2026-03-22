@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"log"
+
+	"github.com/scoututm/scoutd/internal/config"
 )
 
 // Daemon name constants.
@@ -20,8 +22,7 @@ var ReloadOrder = []string{Nftables, Dnsmasq, Unbound, Suricata, WireGuard, Chro
 
 // Manager controls system daemons via OpenRC.
 type Manager struct {
-	stubAll      bool   // Stub all reloads (unit tests).
-	stubNftables bool   // Stub only nftables (Vagrant VM — SSH safety).
+	stubAll bool // Stub all reloads (unit tests).
 }
 
 // NewManager creates a service manager. When stubAll is true, all daemon
@@ -30,21 +31,10 @@ func NewManager(stubAll bool) *Manager {
 	return &Manager{stubAll: stubAll}
 }
 
-// NewVMManager creates a service manager for the Vagrant VM. Only nftables
-// reloads are stubbed (to protect SSH access). All other daemons reload
-// normally so the VM behaves like production.
-func NewVMManager() *Manager {
-	return &Manager{stubNftables: true}
-}
-
 // ReloadDaemon reloads a single daemon.
 func (m *Manager) ReloadDaemon(name string) error {
 	if m.stubAll {
 		log.Printf("[dev-mode] would reload daemon: %s", name)
-		return nil
-	}
-	if m.stubNftables && name == Nftables {
-		log.Printf("[dev-mode] skipping nftables reload (SSH safety)")
 		return nil
 	}
 	return reloadDaemon(name)
@@ -109,15 +99,44 @@ func (m *Manager) SuricataUpdate(rulesets []string) error {
 	return runCmd("suricata-update", "--etopen")
 }
 
+// ApplyInterfaceAddresses configures IPv4 addresses on static (non-WAN)
+// interfaces whose address changed between old and new config.
+func (m *Manager) ApplyInterfaceAddresses(oldIfaces, newIfaces []config.InterfaceConfig) error {
+	oldAddrs := make(map[string]string, len(oldIfaces))
+	for _, iface := range oldIfaces {
+		if iface.IPv4Mode == "static" && iface.IPv4Address != "" {
+			oldAddrs[iface.Name] = iface.IPv4Address
+		}
+	}
+
+	for _, iface := range newIfaces {
+		if iface.Zone == "wan" || iface.IPv4Mode != "static" || iface.IPv4Address == "" {
+			continue
+		}
+		if oldAddrs[iface.Name] == iface.IPv4Address {
+			continue
+		}
+		if m.stubAll {
+			log.Printf("[stub] would apply address %s to %s", iface.IPv4Address, iface.Name)
+			continue
+		}
+		// Flush old IPv4 addresses, then assign the new one.
+		_ = runCmd("ip", "-4", "addr", "flush", "dev", iface.Name)
+		if err := runCmd("ip", "addr", "add", iface.IPv4Address, "dev", iface.Name); err != nil {
+			return fmt.Errorf("applying address %s to %s: %w", iface.IPv4Address, iface.Name, err)
+		}
+		_ = runCmd("ip", "link", "set", iface.Name, "up")
+		log.Printf("applied address %s to %s", iface.IPv4Address, iface.Name)
+	}
+	return nil
+}
+
 // HealthCheck verifies that reloaded daemons are running correctly.
 func (m *Manager) HealthCheck(daemons []string) error {
 	if m.stubAll {
 		return nil
 	}
 	for _, name := range daemons {
-		if m.stubNftables && name == Nftables {
-			continue
-		}
 		if err := checkDaemon(name); err != nil {
 			return fmt.Errorf("health check failed for %s: %w", name, err)
 		}

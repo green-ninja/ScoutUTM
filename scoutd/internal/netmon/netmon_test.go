@@ -6,50 +6,54 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestParseARP(t *testing.T) {
-	input := `IP address       HW type     Flags       HW address            Mask     Device
-192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1
-192.168.1.101    0x1         0x2         AA:BB:CC:DD:EE:02     *        eth1
-192.168.1.200    0x1         0x0         00:00:00:00:00:00     *        eth1
+func TestParseNeigh(t *testing.T) {
+	input := `192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE
+192.168.1.101 dev eth1 lladdr AA:BB:CC:DD:EE:02 STALE
+192.168.1.200 dev eth1  FAILED
 `
-
 	scanner := bufio.NewScanner(strings.NewReader(input))
-	entries, err := parseARP(scanner)
+	entries, err := parseNeigh(scanner)
 	if err != nil {
-		t.Fatalf("parseARP error: %v", err)
+		t.Fatalf("parseNeigh error: %v", err)
 	}
 
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
 
-	// First entry.
 	if entries[0].IP != "192.168.1.100" {
 		t.Errorf("entry[0].IP = %q, want 192.168.1.100", entries[0].IP)
 	}
 	if entries[0].MAC != "aa:bb:cc:dd:ee:01" {
 		t.Errorf("entry[0].MAC = %q, want aa:bb:cc:dd:ee:01", entries[0].MAC)
 	}
-	if entries[0].Interface != "eth1" {
-		t.Errorf("entry[0].Interface = %q, want eth1", entries[0].Interface)
+	if entries[0].Iface != "eth1" {
+		t.Errorf("entry[0].Iface = %q, want eth1", entries[0].Iface)
+	}
+	if entries[0].State != "REACHABLE" {
+		t.Errorf("entry[0].State = %q, want REACHABLE", entries[0].State)
 	}
 
-	// Second entry should be lowercased.
+	// Second entry should be lowercased MAC.
 	if entries[1].MAC != "aa:bb:cc:dd:ee:02" {
 		t.Errorf("entry[1].MAC = %q, want aa:bb:cc:dd:ee:02", entries[1].MAC)
 	}
+	if entries[1].State != "STALE" {
+		t.Errorf("entry[1].State = %q, want STALE", entries[1].State)
+	}
 }
 
-func TestParseARP_SkipsIncomplete(t *testing.T) {
-	input := `IP address       HW type     Flags       HW address            Mask     Device
-192.168.1.200    0x1         0x0         00:00:00:00:00:00     *        eth1
+func TestParseNeigh_SkipsFailed(t *testing.T) {
+	input := `192.168.1.200 dev eth1  FAILED
+192.168.1.201 dev eth1  INCOMPLETE
 `
 	scanner := bufio.NewScanner(strings.NewReader(input))
-	entries, err := parseARP(scanner)
+	entries, err := parseNeigh(scanner)
 	if err != nil {
-		t.Fatalf("parseARP error: %v", err)
+		t.Fatalf("parseNeigh error: %v", err)
 	}
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(entries))
@@ -104,21 +108,28 @@ func TestParseLeases_SkipsComments(t *testing.T) {
 	}
 }
 
-// testScanner creates a Scanner with temp ARP and lease files for testing.
+// writeNeighFile writes ip neigh format test data to a file.
+func writeNeighFile(t *testing.T, dir string, data string) string {
+	t.Helper()
+	path := filepath.Join(dir, "neigh")
+	os.WriteFile(path, []byte(data), 0644)
+	return path
+}
+
+// testScanner creates a Scanner with temp neigh and lease files for testing.
+// All devices are REACHABLE by default.
 func testScanner(t *testing.T) *Scanner {
 	t.Helper()
 	dir := t.TempDir()
 
-	arpFile := filepath.Join(dir, "arp")
-	arpData := `IP address       HW type     Flags       HW address            Mask     Device
-192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1
-192.168.1.101    0x1         0x2         aa:bb:cc:dd:ee:02     *        eth1
-192.168.1.102    0x1         0x2         aa:bb:cc:dd:ee:03     *        eth1
-192.168.1.103    0x1         0x2         aa:bb:cc:dd:ee:04     *        eth1
-192.168.1.104    0x1         0x2         aa:bb:cc:dd:ee:05     *        eth1
-192.168.1.105    0x1         0x2         aa:bb:cc:dd:ee:06     *        eth1
+	neighData := `192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE
+192.168.1.101 dev eth1 lladdr aa:bb:cc:dd:ee:02 REACHABLE
+192.168.1.102 dev eth1 lladdr aa:bb:cc:dd:ee:03 REACHABLE
+192.168.1.103 dev eth1 lladdr aa:bb:cc:dd:ee:04 REACHABLE
+192.168.1.104 dev eth1 lladdr aa:bb:cc:dd:ee:05 REACHABLE
+192.168.1.105 dev eth1 lladdr aa:bb:cc:dd:ee:06 REACHABLE
 `
-	os.WriteFile(arpFile, []byte(arpData), 0644)
+	neighFile := writeNeighFile(t, dir, neighData)
 
 	leaseFile := filepath.Join(dir, "leases")
 	leaseData := `1999999999 aa:bb:cc:dd:ee:01 192.168.1.100 laptop 01:aa:bb:cc:dd:ee:01
@@ -131,7 +142,7 @@ func testScanner(t *testing.T) *Scanner {
 	os.WriteFile(leaseFile, []byte(leaseData), 0644)
 
 	s := NewScanner(leaseFile)
-	s.SetARPFile(arpFile)
+	s.SetNeighFile(neighFile)
 	return s
 }
 
@@ -146,7 +157,7 @@ func TestScanner_ScanFindsDevices(t *testing.T) {
 		t.Errorf("scan returned %d devices, want 6", len(devices))
 	}
 
-	// All should be online (from ARP).
+	// All should be online (REACHABLE).
 	for _, d := range devices {
 		if !d.Online {
 			t.Errorf("device %s should be online", d.MAC)
@@ -157,7 +168,7 @@ func TestScanner_ScanFindsDevices(t *testing.T) {
 	}
 }
 
-func TestScanner_MergesARPAndDHCP(t *testing.T) {
+func TestScanner_MergesNeighAndDHCP(t *testing.T) {
 	s := testScanner(t)
 	if err := s.Scan(); err != nil {
 		t.Fatalf("Scan error: %v", err)
@@ -174,6 +185,123 @@ func TestScanner_MergesARPAndDHCP(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected to find device with hostname 'laptop' from DHCP merge")
+	}
+}
+
+func TestScanner_StaleRecentlyReachable_StaysOnline(t *testing.T) {
+	dir := t.TempDir()
+
+	// First scan: device is REACHABLE.
+	neighFile := writeNeighFile(t, dir, "192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE\n")
+	leaseFile := filepath.Join(dir, "leases")
+	os.WriteFile(leaseFile, []byte(""), 0644)
+
+	s := NewScanner(leaseFile)
+	s.SetNeighFile(neighFile)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan 1 error: %v", err)
+	}
+
+	// Second scan: device transitions to STALE (just went idle).
+	os.WriteFile(neighFile, []byte("192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 STALE\n"), 0644)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan 2 error: %v", err)
+	}
+
+	devices := s.Devices()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if !devices[0].Online {
+		t.Error("device should still be online (STALE but recently REACHABLE)")
+	}
+}
+
+func TestScanner_StaleExpired_GoesOffline(t *testing.T) {
+	dir := t.TempDir()
+
+	neighFile := writeNeighFile(t, dir, "192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE\n")
+	leaseFile := filepath.Join(dir, "leases")
+	os.WriteFile(leaseFile, []byte(""), 0644)
+
+	s := NewScanner(leaseFile)
+	s.SetNeighFile(neighFile)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan 1 error: %v", err)
+	}
+
+	// Simulate time passing beyond OfflineTimeout by backdating lastReachable.
+	s.mu.Lock()
+	s.lastReachable["aa:bb:cc:dd:ee:01"] = s.lastReachable["aa:bb:cc:dd:ee:01"].Add(-OfflineTimeout - time.Minute)
+	s.mu.Unlock()
+
+	// Second scan: device is STALE and lastReachable is beyond timeout.
+	os.WriteFile(neighFile, []byte("192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 STALE\n"), 0644)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan 2 error: %v", err)
+	}
+
+	devices := s.Devices()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if devices[0].Online {
+		t.Error("device should be offline (STALE with expired lastReachable)")
+	}
+}
+
+func TestScanner_DeviceDisappears_GoesOffline(t *testing.T) {
+	dir := t.TempDir()
+
+	neighFile := writeNeighFile(t, dir, "192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE\n")
+	leaseFile := filepath.Join(dir, "leases")
+	os.WriteFile(leaseFile, []byte("1999999999 aa:bb:cc:dd:ee:01 192.168.1.100 laptop cid\n"), 0644)
+
+	s := NewScanner(leaseFile)
+	s.SetNeighFile(neighFile)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan 1 error: %v", err)
+	}
+	if !s.Devices()[0].Online {
+		t.Fatal("device should be online after first scan")
+	}
+
+	// Device completely gone from neighbor table.
+	os.WriteFile(neighFile, []byte(""), 0644)
+	if err := s.Scan(); err != nil {
+		t.Fatalf("Scan 2 error: %v", err)
+	}
+
+	devices := s.Devices()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device (from DHCP lease), got %d", len(devices))
+	}
+	if devices[0].Online {
+		t.Error("device should be offline (gone from neighbor table)")
+	}
+}
+
+func TestScanner_FailedState_Offline(t *testing.T) {
+	dir := t.TempDir()
+
+	neighFile := writeNeighFile(t, dir, "192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE\n")
+	leaseFile := filepath.Join(dir, "leases")
+	os.WriteFile(leaseFile, []byte(""), 0644)
+
+	s := NewScanner(leaseFile)
+	s.SetNeighFile(neighFile)
+	s.Scan()
+
+	// FAILED entries have no lladdr → skipped by parser → device goes offline.
+	os.WriteFile(neighFile, []byte("192.168.1.100 dev eth1  FAILED\n"), 0644)
+	s.Scan()
+
+	devices := s.Devices()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if devices[0].Online {
+		t.Error("FAILED device should be offline")
 	}
 }
 
@@ -267,14 +395,10 @@ func TestScanner_LookupByIP_NotFound(t *testing.T) {
 
 func TestScanner_NoLeaseFile(t *testing.T) {
 	dir := t.TempDir()
-	arpFile := filepath.Join(dir, "arp")
-	arpData := `IP address       HW type     Flags       HW address            Mask     Device
-192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1
-`
-	os.WriteFile(arpFile, []byte(arpData), 0644)
+	neighFile := writeNeighFile(t, dir, "192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE\n")
 
 	s := NewScanner(filepath.Join(dir, "nonexistent-leases"))
-	s.SetARPFile(arpFile)
+	s.SetNeighFile(neighFile)
 	if err := s.Scan(); err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}

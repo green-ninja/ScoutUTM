@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZenTI Unify - Enterprise Network Security for the Rest of Us</title>
+  <meta name="description" content="ZenTI Unify is a home network security appliance that combines firewall, intrusion detection, DNS filtering, VPN, and parental controls. Designed and assembled in the EU. No complexity.">
+  <meta property="og:title" content="ZenTI Unify - Enterprise Security for the Rest of Us">
+  <meta property="og:description" content="A purpose-built network security appliance with firewall, IDS/IPS, DNS filtering, VPN, and parental controls. Designed and assembled in the EU.">
+  <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --color-bg: #0a0e1a;
+      --color-surface: #111827;
+      --color-surface-2: #1a2236;
+      --color-border: #1e293b;
+      --color-text: #e2e8f0;
+      --color-text-muted: #94a3b8;
+      --color-accent: #8b5cf6;
+      --color-accent-hover: #7c3aed;
+      --color-accent-glow: rgba(139, 92, 246, 0.15);
+      --color-green: #10b981;
+      --color-amber: #f59e0b;
+      --color-red: #ef4444;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- Layout ---- */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    @media (min-width: 768px) {
+      .container { padding: 0 48px; }
+    }
+
+    /* ---- Nav ---- */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(10, 14, 26, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.2rem;
+      color: #fff;
+      text-decoration: none;
+    }
+    .logo svg { flex-shrink: 0; }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-links a {
+      color: var(--color-text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: #fff; }
+    .nav-links a.btn-primary { color: #fff; }
+
+    /* ---- Buttons ---- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-family: var(--font);
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--color-accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--color-accent-hover);
+      box-shadow: 0 0 24px var(--color-accent-glow);
+    }
+    .btn-outline {
+      background: transparent;
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+    .btn-outline:hover {
+      border-color: var(--color-text-muted);
+      background: var(--color-surface);
+    }
+    .btn-sm { padding: 8px 20px; font-size: 0.85rem; }
+    .btn-lg { padding: 16px 36px; font-size: 1.05rem; }
+
+    /* ---- Hero ---- */
+    .hero {
+      padding: 140px 0 80px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, var(--color-accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+      margin-bottom: 32px;
+    }
+    .hero-badge .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-green);
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 24px;
+      color: #fff;
+    }
+    .hero h1 .highlight {
+      background: linear-gradient(135deg, var(--color-accent), #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--color-text-muted);
+      max-width: 640px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 48px;
+    }
+
+    /* ---- Social proof ---- */
+    .proof {
+      padding: 24px 0 60px;
+    }
+    .proof-stats {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+    }
+    .proof-stat .number {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .proof-stat .label {
+      font-size: 0.82rem;
+      color: var(--color-text-muted);
+      margin-top: 4px;
+    }
+
+    /* ---- Problem / Agitate ---- */
+    .problem {
+      padding: 60px 0 80px;
+      border-top: 1px solid var(--color-border);
+    }
+    .problem-inner {
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .problem h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 24px;
+      letter-spacing: -0.02em;
+    }
+    .problem p {
+      color: var(--color-text-muted);
+      font-size: 1.05rem;
+      line-height: 1.8;
+      margin-bottom: 48px;
+    }
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      text-align: left;
+    }
+    .problem-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .problem-card .problem-icon {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+      display: block;
+    }
+    .problem-card h4 {
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .problem-card p {
+      color: var(--color-text-muted);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      margin-bottom: 0;
+    }
+
+    /* ---- Features ---- */
+    .features {
+      padding: 80px 0;
+    }
+    .section-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--color-accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .section-desc {
+      color: var(--color-text-muted);
+      max-width: 560px;
+      font-size: 1.05rem;
+      line-height: 1.7;
+      margin-bottom: 56px;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+    }
+    .feature-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 32px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .feature-card:hover {
+      border-color: #2d3a54;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+    }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .feature-icon svg { width: 22px; height: 22px; }
+    .fi-blue { background: rgba(59,130,246,0.12); color: #3b82f6; }
+    .fi-green { background: rgba(16,185,129,0.12); color: var(--color-green); }
+    .fi-amber { background: rgba(245,158,11,0.12); color: var(--color-amber); }
+    .fi-purple { background: rgba(139,92,246,0.12); color: #8b5cf6; }
+    .fi-red { background: rgba(239,68,68,0.12); color: #ef4444; }
+    .fi-cyan { background: rgba(6,182,212,0.12); color: #06b6d4; }
+    .feature-card h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    .feature-card .feature-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-top: 12px;
+    }
+    .tag-green { background: rgba(16,185,129,0.12); color: var(--color-green); }
+    .tag-amber { background: rgba(245,158,11,0.12); color: var(--color-amber); }
+
+    /* ---- Comparison ---- */
+    .comparison {
+      padding: 80px 0;
+      border-top: 1px solid var(--color-border);
+    }
+    .comparison .section-title { text-align: center; }
+    .comparison .section-desc {
+      text-align: center;
+      max-width: 640px;
+      margin: 0 auto 56px;
+    }
+    .comparison-table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+    }
+    .comparison-table {
+      width: 100%;
+      min-width: 800px;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .comparison-table thead th {
+      background: var(--color-surface-2);
+      padding: 14px 16px;
+      text-align: left;
+      font-weight: 600;
+      color: #fff;
+      border-bottom: 1px solid var(--color-border);
+      white-space: nowrap;
+    }
+    .comparison-table thead th:first-child {
+      border-top-left-radius: 12px;
+    }
+    .comparison-table thead th:last-child {
+      border-top-right-radius: 12px;
+    }
+    .comparison-table thead th.col-zenti {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--color-accent);
+    }
+    .comparison-table tbody td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-border);
+      color: var(--color-text-muted);
+      vertical-align: top;
+    }
+    .comparison-table tbody tr:last-child td { border-bottom: none; }
+    .comparison-table tbody td:first-child {
+      font-weight: 500;
+      color: var(--color-text);
+      white-space: nowrap;
+    }
+    .comparison-table tbody td.col-zenti {
+      background: rgba(139, 92, 246, 0.05);
+      color: var(--color-text);
+      font-weight: 500;
+    }
+    .comparison-table .check { color: var(--color-green); }
+    .comparison-table .cross { color: #4b5563; }
+    .comparison-table .partial { color: var(--color-amber); }
+    .comparison-note {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: #4b5563;
+    }
+
+    /* ---- Specs ---- */
+    .specs {
+      padding: 80px 0;
+    }
+    .specs-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: center;
+    }
+    .specs-visual {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 40px;
+    }
+    .specs-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .specs-list li {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .specs-list .spec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--color-accent);
+      margin-top: 8px;
+      flex-shrink: 0;
+    }
+    .specs-list strong {
+      color: #fff;
+      font-weight: 600;
+    }
+    .specs-list p {
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    /* ---- Hardware ---- */
+    .hardware {
+      padding: 80px 0;
+      border-top: 1px solid var(--color-border);
+    }
+    .hardware-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: start;
+    }
+    .hw-spec-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 32px;
+    }
+    .hw-spec-card h3 {
+      color: #fff;
+      font-weight: 700;
+      font-size: 1.2rem;
+      margin-bottom: 4px;
+    }
+    .hw-spec-card .hw-subtitle {
+      color: var(--color-text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 24px;
+    }
+    .hw-spec-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .hw-spec-list li {
+      display: flex;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--color-border);
+      font-size: 0.9rem;
+    }
+    .hw-spec-list li:last-child { border-bottom: none; padding-bottom: 0; }
+    .hw-spec-list .hw-label { color: var(--color-text-muted); }
+    .hw-spec-list .hw-value { color: #fff; font-weight: 500; text-align: right; }
+
+    /* ---- Trust / EU ---- */
+    .trust {
+      padding: 80px 0;
+    }
+    .trust-box {
+      background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-surface-2) 100%);
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 64px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: center;
+    }
+    .trust-box h2 {
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .trust-box > div > p {
+      color: var(--color-text-muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+    .trust-points {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .trust-points li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.95rem;
+      color: var(--color-text);
+    }
+    .trust-points svg {
+      width: 20px;
+      height: 20px;
+      color: var(--color-green);
+      flex-shrink: 0;
+    }
+
+    /* ---- Pricing ---- */
+    .pricing {
+      padding: 80px 0;
+      text-align: center;
+      border-top: 1px solid var(--color-border);
+    }
+    .pricing-cards {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 48px;
+    }
+    .pricing-card {
+      max-width: 420px;
+      flex: 1;
+      min-width: 300px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 40px 32px;
+      text-align: left;
+    }
+    .pricing-card.featured {
+      border-color: var(--color-accent);
+      box-shadow: 0 0 40px var(--color-accent-glow);
+      position: relative;
+    }
+    .pricing-card.featured::before {
+      content: 'Most Popular';
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 16px;
+      background: var(--color-accent);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pricing-card .pricing-tier {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-accent);
+      margin-bottom: 8px;
+    }
+    .pricing-card .pricing-name {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .pricing-card .price {
+      font-size: 2.8rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    .pricing-card .price-note {
+      color: var(--color-text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+    .pricing-features {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .pricing-features li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.88rem;
+      color: var(--color-text);
+    }
+    .pricing-features svg {
+      width: 18px;
+      height: 18px;
+      color: var(--color-green);
+      flex-shrink: 0;
+    }
+    .pricing-card .btn { width: 100%; }
+    .pricing-savings {
+      max-width: 640px;
+      margin: 0 auto;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 28px 32px;
+      text-align: left;
+    }
+    .pricing-savings h4 {
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .savings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      font-size: 0.88rem;
+    }
+    .savings-row:not(:last-child) { border-bottom: 1px solid var(--color-border); }
+    .savings-row .savings-product { color: var(--color-text-muted); }
+    .savings-row .savings-cost { color: var(--color-text); font-weight: 500; }
+    .savings-row.savings-highlight .savings-product { color: var(--color-accent); font-weight: 600; }
+    .savings-row.savings-highlight .savings-cost { color: var(--color-accent); font-weight: 700; }
+
+    /* ---- Waitlist CTA ---- */
+    .waitlist {
+      padding: 80px 0 100px;
+      text-align: center;
+    }
+    .waitlist-box {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .waitlist h2 {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .waitlist p {
+      color: var(--color-text-muted);
+      margin-bottom: 32px;
+      font-size: 1.05rem;
+      line-height: 1.7;
+    }
+    .waitlist-form {
+      display: flex;
+      gap: 12px;
+      max-width: 460px;
+      margin: 0 auto;
+    }
+    .waitlist-form input {
+      flex: 1;
+      padding: 14px 18px;
+      border-radius: 8px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: #fff;
+      font-family: var(--font);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .waitlist-form input::placeholder { color: #4b5563; }
+    .waitlist-form input:focus { border-color: var(--color-accent); }
+    .waitlist-form .btn { white-space: nowrap; }
+    .waitlist-note {
+      margin-top: 16px;
+      font-size: 0.8rem;
+      color: #4b5563;
+    }
+    .form-success {
+      display: none;
+      padding: 20px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      border-radius: 8px;
+      color: var(--color-green);
+      font-weight: 500;
+    }
+
+    /* ---- FAQ ---- */
+    .faq {
+      padding: 80px 0;
+      border-top: 1px solid var(--color-border);
+    }
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 24px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    .faq-item {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .faq-item h4 {
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .faq-item p {
+      color: var(--color-text-muted);
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+
+    /* ---- About ---- */
+    .about {
+      padding: 80px 0;
+    }
+    .about-box {
+      max-width: 720px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .about h2 {
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 24px;
+      letter-spacing: -0.02em;
+    }
+    .about p {
+      color: var(--color-text-muted);
+      font-size: 1.05rem;
+      line-height: 1.8;
+      margin-bottom: 16px;
+    }
+    .about p:last-of-type { margin-bottom: 0; }
+    .about .location {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 24px;
+      padding: 8px 20px;
+      border-radius: 999px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+    }
+
+    /* ---- Footer ---- */
+    footer {
+      border-top: 1px solid var(--color-border);
+      padding: 40px 0;
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer-copy {
+      font-size: 0.85rem;
+      color: #4b5563;
+    }
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+    .footer-links a {
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: #fff; }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 768px) {
+      .specs-grid,
+      .trust-box,
+      .hardware-grid { grid-template-columns: 1fr; }
+      .trust-box { padding: 40px 28px; }
+      .nav-links .nav-link-text { display: none; }
+      .proof-stats { gap: 24px; }
+      .proof-stat .number { font-size: 1.5rem; }
+      .waitlist-form { flex-direction: column; }
+      .footer-inner { flex-direction: column; gap: 16px; text-align: center; }
+      .problem-grid { grid-template-columns: 1fr; }
+      .faq-grid { grid-template-columns: 1fr; }
+      .pricing-card { min-width: unset; }
+      .savings-row { font-size: 0.82rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container nav-inner">
+      <a href="#" class="logo">
+        <svg width="30" height="30" viewBox="0 0 512 512" fill="none">
+          <circle cx="256" cy="256" r="210" stroke="#8b5cf6" stroke-width="32" stroke-linecap="round" stroke-dasharray="1240 80" fill="none"/>
+          <circle cx="256" cy="160" r="24" fill="#fff"/>
+          <circle cx="160" cy="328" r="24" fill="#fff"/>
+          <circle cx="352" cy="328" r="24" fill="#fff"/>
+          <line x1="256" y1="184" x2="168" y2="308" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+          <line x1="256" y1="184" x2="344" y2="308" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+          <line x1="184" y1="328" x2="328" y2="328" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+        </svg>
+        ZenTI
+      </a>
+      <div class="nav-links">
+        <a href="#features" class="nav-link-text">Features</a>
+        <a href="#compare" class="nav-link-text">Compare</a>
+        <a href="#pricing" class="nav-link-text">Pricing</a>
+        <a href="#waitlist" class="btn btn-primary btn-sm">Join Waitlist</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        Designed &amp; assembled in the EU
+      </div>
+      <h1>Your network deserves<br><span class="highlight">real security</span></h1>
+      <p>ZenTI Unify is a purpose-built appliance that protects your home and small business with the same security engines used by enterprises &mdash; firewall, intrusion prevention, DNS filtering, VPN, and parental controls. One box. No complexity.</p>
+      <div class="hero-actions">
+        <a href="#waitlist" class="btn btn-primary btn-lg">Join the Waitlist</a>
+        <a href="#features" class="btn btn-outline btn-lg">See What's Inside</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Social proof -->
+  <section class="proof">
+    <div class="container">
+      <div class="proof-stats">
+        <div class="proof-stat">
+          <div class="number">6</div>
+          <div class="label">Security engines</div>
+        </div>
+        <div class="proof-stat">
+          <div class="number">2.5 Gbps</div>
+          <div class="label">Line-rate ports</div>
+        </div>
+        <div class="proof-stat">
+          <div class="number">Suricata</div>
+          <div class="label">IDS/IPS engine</div>
+        </div>
+        <div class="proof-stat">
+          <div class="number">&lt;15s</div>
+          <div class="label">Boot to protected</div>
+        </div>
+        <div class="proof-stat">
+          <div class="number">~60 MB</div>
+          <div class="label">OS footprint</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Problem -->
+  <section class="problem">
+    <div class="container">
+      <div class="problem-inner">
+        <div class="section-label">The Problem</div>
+        <h2>Your home network is more exposed than you think</h2>
+        <p>The average household has 20&ndash;50 connected devices &mdash; laptops, phones, smart TVs, cameras, baby monitors, game consoles. The attack surface rivals a small business, but the security tools available are either impossibly complex or dangerously shallow.</p>
+      </div>
+      <div class="problem-grid">
+        <div class="problem-card">
+          <span class="problem-icon" aria-hidden="true">&#128200;</span>
+          <h4>Enterprise firewalls</h4>
+          <p>Powerful, but need a certification to configure. Built for IT teams, not families.</p>
+        </div>
+        <div class="problem-card">
+          <span class="problem-icon" aria-hidden="true">&#128176;</span>
+          <h4>Subscription traps</h4>
+          <p>Many vendors charge $300&ndash;$1,000/year for threat updates. Miss a payment, lose protection.</p>
+        </div>
+        <div class="problem-card">
+          <span class="problem-icon" aria-hidden="true">&#128274;</span>
+          <h4>Consumer routers</h4>
+          <p>Basic "firewall" checkbox with no real inspection. No IDS. No per-device controls.</p>
+        </div>
+        <div class="problem-card">
+          <span class="problem-icon" aria-hidden="true">&#9729;&#65039;</span>
+          <h4>Cloud-dependent boxes</h4>
+          <p>Your traffic routed through someone else's servers. If their cloud goes down, so does your security.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-label">What You Get</div>
+      <h2 class="section-title">Six layers of protection. One clean interface.</h2>
+      <p class="section-desc">Enterprise-grade security engines managed through a dashboard anyone can use. No expertise required. No command line.</p>
+      <div class="features-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon fi-blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Zone-Based Firewall</h3>
+          <p>Stateful packet inspection with network zones. Isolate IoT devices, guest Wi-Fi, and kids' devices into separate segments &mdash; each with its own rules. Port forwarding, anti-spoofing, and IPv6 blocking built in.</p>
+          <span class="feature-tag tag-green">nftables engine</span>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon fi-red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <h3>Intrusion Prevention (IPS)</h3>
+          <p>Powered by Suricata &mdash; the same open-source engine trusted by governments and enterprises worldwide. Inspects traffic in real time and blocks attacks inline. Not a proprietary black box.</p>
+          <span class="feature-tag tag-green">Suricata engine</span>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon fi-green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <h3>Ad &amp; Malware Blocking</h3>
+          <p>Blocks ads, phishing sites, and malware domains at the DNS level before they reach any device. Works network-wide &mdash; no browser extensions, no per-device apps. Covers every device automatically.</p>
+          <span class="feature-tag tag-green">DNS-level, network-wide</span>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon fi-purple">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h3>WireGuard VPN</h3>
+          <p>Connect to your home network securely from anywhere. Scan a QR code on your phone and you're in. Split tunnel or full tunnel. Modern, fast, and uses less battery than legacy VPN protocols.</p>
+          <span class="feature-tag tag-green">QR code setup</span>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon fi-amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <h3>Parental Controls</h3>
+          <p>Per-device profiles with 8 content categories, SafeSearch enforcement, YouTube Restricted Mode, and time-based schedules with day-of-week granularity. Checked every 60 seconds &mdash; no way around it.</p>
+          <span class="feature-tag tag-amber">Best in class</span>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon fi-cyan">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3>Live Dashboard</h3>
+          <p>Real-time CPU, memory, throughput, and connection stats via WebSocket. See every connected device, its manufacturer, bandwidth usage, and any threats blocked. Automatic device discovery via ARP + DHCP.</p>
+          <span class="feature-tag tag-green">Real-time WebSocket</span>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison -->
+  <section class="comparison" id="compare">
+    <div class="container">
+      <div class="section-label" style="text-align:center;">How We Compare</div>
+      <h2 class="section-title">See how ZenTI stacks up</h2>
+      <p class="section-desc">We benchmarked against the most popular home and SMB security appliances. Here's where things stand.</p>
+
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="col-zenti">ZenTI Unify</th>
+              <th>Firewalla Gold+</th>
+              <th>pfSense+ (Netgate)</th>
+              <th>Ubiquiti UDM Pro</th>
+              <th>Sophos XGS 88</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Stateful Firewall</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> Zone-based</td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+            </tr>
+            <tr>
+              <td>IDS/IPS Engine</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> Suricata (open)</td>
+              <td><span class="partial">~</span> Proprietary</td>
+              <td><span class="check">&#10003;</span> Suricata/Snort</td>
+              <td><span class="partial">~</span> Basic DPI</td>
+              <td><span class="check">&#10003;</span> Xstream</td>
+            </tr>
+            <tr>
+              <td>VPN</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> WireGuard + QR</td>
+              <td><span class="check">&#10003;</span> WG + OpenVPN</td>
+              <td><span class="check">&#10003;</span> IPsec + WG</td>
+              <td><span class="check">&#10003;</span> WG + IPsec</td>
+              <td><span class="partial">~</span> IPsec + SSL</td>
+            </tr>
+            <tr>
+              <td>Parental Controls</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> Per-device + schedules</td>
+              <td><span class="check">&#10003;</span> Per-device</td>
+              <td><span class="cross">&#10005;</span> None</td>
+              <td><span class="partial">~</span> Basic</td>
+              <td><span class="partial">~</span> URL filtering</td>
+            </tr>
+            <tr>
+              <td>Ad/Malware Blocking</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> DNS-level</td>
+              <td><span class="check">&#10003;</span> DNS-level</td>
+              <td><span class="partial">~</span> pfBlockerNG pkg</td>
+              <td><span class="partial">~</span> Basic</td>
+              <td><span class="partial">~</span> Via web filter</td>
+            </tr>
+            <tr>
+              <td>VLAN Segmentation</td>
+              <td class="col-zenti"><span class="check">&#10003;</span></td>
+              <td><span class="partial">~</span> Limited</td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+            </tr>
+            <tr>
+              <td>Encrypted DNS (DoT)</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> Default on</td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="partial">~</span> Manual config</td>
+              <td><span class="cross">&#10005;</span></td>
+              <td><span class="cross">&#10005;</span></td>
+            </tr>
+            <tr>
+              <td>DNSSEC Validation</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> Always on</td>
+              <td><span class="partial">~</span></td>
+              <td><span class="check">&#10003;</span> Unbound</td>
+              <td><span class="cross">&#10005;</span></td>
+              <td><span class="cross">&#10005;</span></td>
+            </tr>
+            <tr>
+              <td>Secure Boot / Verified OS</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> dm-verity</td>
+              <td><span class="partial">~</span></td>
+              <td><span class="cross">&#10005;</span></td>
+              <td><span class="partial">~</span></td>
+              <td><span class="check">&#10003;</span></td>
+            </tr>
+            <tr>
+              <td>Safe OTA Updates</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> A/B + rollback</td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="cross">&#10005;</span></td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+            </tr>
+            <tr>
+              <td>100% Local Processing</td>
+              <td class="col-zenti"><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="check">&#10003;</span></td>
+              <td><span class="partial">~</span> Cloud controller</td>
+              <td><span class="partial">~</span> Sophos Central</td>
+            </tr>
+            <tr>
+              <td>EU Designed &amp; Assembled</td>
+              <td class="col-zenti"><span class="check">&#10003;</span></td>
+              <td><span class="cross">&#10005;</span> USA</td>
+              <td><span class="cross">&#10005;</span> USA</td>
+              <td><span class="cross">&#10005;</span> USA</td>
+              <td><span class="cross">&#10005;</span> UK</td>
+            </tr>
+            <tr>
+              <td>Mandatory Subscription</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> 1st year included</td>
+              <td><span class="check">&#10003;</span> None ever</td>
+              <td><span class="check">&#10003;</span> None</td>
+              <td><span class="partial">~</span> Optional $99/yr</td>
+              <td><span class="cross">&#10005;</span> $300&ndash;800/yr</td>
+            </tr>
+            <tr>
+              <td>Setup Complexity</td>
+              <td class="col-zenti"><span class="check">&#10003;</span> Guided wizard</td>
+              <td><span class="check">&#10003;</span> App-guided</td>
+              <td><span class="cross">&#10005;</span> Expert-level</td>
+              <td><span class="partial">~</span> Moderate</td>
+              <td><span class="cross">&#10005;</span> Expert-level</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="comparison-note">Comparison based on publicly available specifications and default configurations as of early 2026.</p>
+    </div>
+  </section>
+
+  <!-- Specs / How It Works -->
+  <section class="specs" id="specs">
+    <div class="container">
+      <div class="section-label">How It Works</div>
+      <h2 class="section-title">Secure by design. Simple by choice.</h2>
+      <div class="specs-grid">
+        <div class="specs-visual" style="font-family: var(--font); text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;">
+          <div style="font-size: 1.1rem; color: #fff; font-weight: 600;">Three steps. That's it.</div>
+          <div style="display: flex; flex-direction: column; gap: 20px; text-align: left; width: 100%; max-width: 320px;">
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <span style="width: 36px; height: 36px; border-radius: 50%; background: rgba(139,92,246,0.15); color: var(--color-accent); display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;">1</span>
+              <span>Plug into your router</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <span style="width: 36px; height: 36px; border-radius: 50%; background: rgba(139,92,246,0.15); color: var(--color-accent); display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;">2</span>
+              <span>Run the setup wizard</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <span style="width: 36px; height: 36px; border-radius: 50%; background: rgba(139,92,246,0.15); color: var(--color-accent); display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;">3</span>
+              <span>Your network is protected</span>
+            </div>
+          </div>
+          <div style="font-size: 0.85rem; color: var(--color-text-muted);">Operational in under 15 seconds. No certifications required.</div>
+        </div>
+        <ul class="specs-list">
+          <li>
+            <span class="spec-dot"></span>
+            <div>
+              <strong>Tamper-proof operating system</strong>
+              <p>Read-only SquashFS root with dm-verity integrity checking on every boot. Malware cannot modify the OS, even with root access.</p>
+            </div>
+          </li>
+          <li>
+            <span class="spec-dot"></span>
+            <div>
+              <strong>Automatic updates, zero risk</strong>
+              <p>A/B partition scheme with cryptographic signature verification. If an update fails, the device automatically rolls back. You're never left unprotected.</p>
+            </div>
+          </li>
+          <li>
+            <span class="spec-dot"></span>
+            <div>
+              <strong>Your data stays home</strong>
+              <p>100% local processing. No cloud accounts, no telemetry, no data leaving your network. Your traffic is your business.</p>
+            </div>
+          </li>
+          <li>
+            <span class="spec-dot"></span>
+            <div>
+              <strong>Encrypted DNS by default</strong>
+              <p>All DNS queries use DNS-over-TLS with DNSSEC validation. Your ISP cannot see or tamper with your DNS lookups.</p>
+            </div>
+          </li>
+          <li>
+            <span class="spec-dot"></span>
+            <div>
+              <strong>Network segmentation</strong>
+              <p>Zone-based architecture with VLAN support. Isolate IoT, guests, and kids into separate networks so a compromised smart bulb can't reach your laptop.</p>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Hardware -->
+  <section class="hardware" id="hardware">
+    <div class="container">
+      <div class="section-label">Hardware</div>
+      <h2 class="section-title">Built to perform. Built to last.</h2>
+      <p class="section-desc">Fanless, silent, low-power hardware with 2.5 Gigabit Ethernet. No moving parts means no failures and no noise.</p>
+      <div class="hardware-grid">
+        <div class="hw-spec-card">
+          <h3>ZenTI Unify</h3>
+          <div class="hw-subtitle">For homes and small offices</div>
+          <ul class="hw-spec-list">
+            <li>
+              <span class="hw-label">Processor</span>
+              <span class="hw-value">Intel N97, 4 cores, AES-NI</span>
+            </li>
+            <li>
+              <span class="hw-label">Memory</span>
+              <span class="hw-value">8 GB DDR5</span>
+            </li>
+            <li>
+              <span class="hw-label">Storage</span>
+              <span class="hw-value">128 GB NVMe</span>
+            </li>
+            <li>
+              <span class="hw-label">Network</span>
+              <span class="hw-value">2&times; 2.5GbE Intel I226-V</span>
+            </li>
+            <li>
+              <span class="hw-label">Cooling</span>
+              <span class="hw-value">Fanless (passive)</span>
+            </li>
+            <li>
+              <span class="hw-label">Power</span>
+              <span class="hw-value">&lt;15W typical</span>
+            </li>
+          </ul>
+        </div>
+        <div class="hw-spec-card">
+          <h3>ZenTI Unify Pro</h3>
+          <div class="hw-subtitle">For power users and growing businesses</div>
+          <ul class="hw-spec-list">
+            <li>
+              <span class="hw-label">Processor</span>
+              <span class="hw-value">Intel i3-N305, 8 cores, AES-NI</span>
+            </li>
+            <li>
+              <span class="hw-label">Memory</span>
+              <span class="hw-value">16 GB DDR5</span>
+            </li>
+            <li>
+              <span class="hw-label">Storage</span>
+              <span class="hw-value">256 GB NVMe</span>
+            </li>
+            <li>
+              <span class="hw-label">Network</span>
+              <span class="hw-value">2&times; 2.5GbE Intel I226-V</span>
+            </li>
+            <li>
+              <span class="hw-label">Cooling</span>
+              <span class="hw-value">Fanless (passive)</span>
+            </li>
+            <li>
+              <span class="hw-label">Power</span>
+              <span class="hw-value">&lt;20W typical</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Trust / EU -->
+  <section class="trust">
+    <div class="container">
+      <div class="trust-box">
+        <div>
+          <div class="section-label">Made in Europe</div>
+          <h2>You know exactly where it comes from</h2>
+          <p>ZenTI Unify is designed and assembled in the European Union with a fully documented supply chain. As the EU Cyber Resilience Act and NIS2 raise the bar for digital security, we're already there.</p>
+        </div>
+        <ul class="trust-points">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Designed and assembled in the EU
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Transparent, auditable supply chain
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Updates cryptographically signed and verified
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            OS integrity checked on every boot
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            No cloud dependency, no telemetry
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            CRA and GDPR aligned
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing" id="pricing">
+    <div class="container">
+      <div class="section-label">Pricing</div>
+      <h2 class="section-title">Simple, transparent pricing</h2>
+      <p class="section-desc" style="margin: 0 auto 48px;">Every ZenTI Unify ships with a full year of service included. After year one, an annual subscription keeps your threat rules, blocklists, and firmware current.</p>
+      <div class="pricing-cards">
+
+        <div class="pricing-card featured">
+          <div class="pricing-tier">Appliance</div>
+          <div class="pricing-name">ZenTI Unify</div>
+          <div class="price">&euro;449</div>
+          <div class="price-note">Hardware + first year of service included.<br>Then &euro;99/year to continue protection.</div>
+          <ul class="pricing-features">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Suricata IDS/IPS with rule updates
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Zone-based firewall + VLAN segmentation
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Ad, malware &amp; phishing blocklists
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              WireGuard VPN with QR code setup
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Parental controls &amp; screen time schedules
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Live dashboard &amp; device monitoring
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Automatic firmware updates + rollback
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              EU-assembled hardware
+            </li>
+          </ul>
+          <a href="#waitlist" class="btn btn-primary">Join Waitlist</a>
+        </div>
+
+        <div class="pricing-card">
+          <div class="pricing-tier">Appliance</div>
+          <div class="pricing-name">ZenTI Unify Pro</div>
+          <div class="price">&euro;649</div>
+          <div class="price-note">Hardware + first year of service included.<br>Then &euro;99/year to continue protection.</div>
+          <ul class="pricing-features">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Everything in ZenTI Unify, plus:
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              8-core Intel i3-N305 processor
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              16 GB DDR5 memory
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              256 GB NVMe storage
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Higher IDS/IPS throughput
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Priority email support
+            </li>
+          </ul>
+          <a href="#waitlist" class="btn btn-outline">Join Waitlist</a>
+        </div>
+
+      </div>
+
+      <!-- TCO comparison -->
+      <div class="pricing-savings">
+        <h4>3-year total cost of ownership (EU buyer, inc. shipping &amp; import fees)</h4>
+        <div class="savings-row savings-highlight">
+          <span class="savings-product">ZenTI Unify</span>
+          <span class="savings-cost">&euro;647</span>
+        </div>
+        <div class="savings-row">
+          <span class="savings-product">Firewalla Gold Plus (no sub, US import)</span>
+          <span class="savings-cost">~&euro;750</span>
+        </div>
+        <div class="savings-row">
+          <span class="savings-product">Ubiquiti UDM Pro Max + CyberSecure</span>
+          <span class="savings-cost">~&euro;900</span>
+        </div>
+        <div class="savings-row">
+          <span class="savings-product">Sophos XGS 88 + Xstream Protection</span>
+          <span class="savings-cost">~&euro;1,400</span>
+        </div>
+        <div class="savings-row">
+          <span class="savings-product">Fortinet 40F + UTP bundle</span>
+          <span class="savings-cost">~&euro;1,500</span>
+        </div>
+        <div class="savings-row">
+          <span class="savings-product">SonicWall TZ270 + EPSS</span>
+          <span class="savings-cost">~&euro;1,400</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq" id="faq">
+    <div class="container">
+      <div class="section-label" style="text-align:center;">FAQ</div>
+      <h2 class="section-title" style="text-align:center;">Common questions</h2>
+      <p class="section-desc" style="text-align:center; margin: 0 auto 48px; max-width: 640px;"></p>
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h4>What happens after the first year?</h4>
+          <p>Your appliance continues to work as a firewall and VPN. The &euro;99/year subscription keeps threat detection rules, DNS blocklists, and firmware updates current. Think of it like antivirus signatures &mdash; threats evolve, and your protection should too.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Do I need to replace my router?</h4>
+          <p>No. ZenTI Unify sits between your router and your network. Your existing router handles Wi-Fi and internet connectivity. ZenTI handles security, filtering, and segmentation.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Why Suricata instead of a proprietary engine?</h4>
+          <p>Suricata is the most widely deployed open-source IPS engine in the world, used by governments, ISPs, and enterprises. It's transparent, auditable, and backed by a global community. No black boxes.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Can my kids bypass the parental controls?</h4>
+          <p>Controls are enforced at the network level via DNS filtering with forced DNS redirect. Devices cannot use alternative DNS servers. Schedules are checked every 60 seconds. Switching to mobile data is the only workaround.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Is my data sent to the cloud?</h4>
+          <p>No. Everything is processed locally on the appliance. No cloud accounts, no telemetry, no analytics. Update checks contact our server only to compare version numbers.</p>
+        </div>
+        <div class="faq-item">
+          <h4>What if an update bricks the device?</h4>
+          <p>It can't. ZenTI uses A/B partition firmware with cryptographic verification. If an update fails integrity checks, the device boots the previous working version automatically.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Waitlist -->
+  <section class="waitlist" id="waitlist">
+    <div class="container">
+      <div class="waitlist-box">
+        <h2>Be the first to know</h2>
+        <p>ZenTI Unify is currently in development. Join the waitlist to get notified when we launch and receive early-bird pricing.</p>
+        <form class="waitlist-form" id="waitlist-form">
+          <input type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+          <button type="submit" class="btn btn-primary">Join Waitlist</button>
+        </form>
+        <div class="form-success" id="form-success">
+          You're on the list! We'll be in touch when ZenTI Unify is ready.
+        </div>
+        <p class="waitlist-note">No spam. Unsubscribe anytime. We respect your privacy.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- About -->
+  <section class="about" id="about">
+    <div class="container">
+      <div class="about-box">
+        <div class="section-label">About ZenTI.sh</div>
+        <h2>Zagreb Engineering &amp; Network Technology Institute</h2>
+        <p>Founded in Zagreb, Croatia, ZenTI.sh is building network security for the people who need it most and understand it least. We believe real protection shouldn't require a certification, a consultant, or a recurring fee that costs more than the hardware.</p>
+        <p>Every ZenTI appliance is assembled in the EU with documented components, open-source security engines, and firmware you can verify yourself. No black boxes. No hidden dependencies. No compromises.</p>
+        <div class="location">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Zagreb, Croatia &mdash; European Union
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div class="footer-copy">&copy; 2026 ZenTI.sh d.o.o. All rights reserved.</div>
+      <div class="footer-links">
+        <a href="mailto:hello@zenti.sh">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Waitlist form handler
+    document.getElementById('waitlist-form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var email = this.querySelector('input[name="email"]').value;
+
+      // TODO: Replace with real API call
+      console.log('Waitlist signup:', email);
+
+      this.style.display = 'none';
+      document.getElementById('form-success').style.display = 'block';
+    });
+  </script>
+
+</body>
+</html>

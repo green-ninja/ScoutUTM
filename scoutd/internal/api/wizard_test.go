@@ -47,7 +47,6 @@ func TestWizard_Step2_Password(t *testing.T) {
 
 	cfg := srv.Config.Current()
 	cfg.System.SetupDone = false
-	cfg.System.AdminHash = "" // Clear hash so wizard step 2 can set it.
 	srv.Config.SetCurrent(cfg)
 	srv.Config.Save()
 
@@ -59,7 +58,7 @@ func TestWizard_Step2_Password(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// Step 2: short password should fail.
+	// Step 2: short password should fail validation.
 	body, _ := json.Marshal(map[string]string{"password": "short"})
 	req = httptest.NewRequest("POST", "/api/v1/wizard/step/2", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -69,7 +68,7 @@ func TestWizard_Step2_Password(t *testing.T) {
 		t.Errorf("step 2 short password: status = %d, want 400", w.Code)
 	}
 
-	// Step 2: valid password.
+	// Step 2: valid password (validated only, applied at step 7).
 	body, _ = json.Marshal(map[string]string{"password": "newpassword123"})
 	req = httptest.NewRequest("POST", "/api/v1/wizard/step/2", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -136,7 +135,6 @@ func TestWizard_FullFlow(t *testing.T) {
 
 	cfg := srv.Config.Current()
 	cfg.System.SetupDone = false
-	cfg.System.AdminHash = "" // Clear hash so wizard step 2 can set it.
 	srv.Config.SetCurrent(cfg)
 	srv.Config.Save()
 
@@ -186,15 +184,18 @@ func TestWizard_FullFlow(t *testing.T) {
 		t.Fatalf("step 6: %d", code)
 	}
 
-	// Step 7: Apply.
-	if code := doStep(7, nil); code != 200 {
+	// Step 7: Apply (sets password + setup_done).
+	if code := doStep(7, map[string]string{"password": "securepassword1"}); code != 200 {
 		t.Fatalf("step 7: %d", code)
 	}
 
-	// Verify setup_done is now true.
+	// Verify setup_done and admin hash are set.
 	finalCfg := srv.Config.Current()
 	if !finalCfg.System.SetupDone {
 		t.Error("expected setup_done = true after wizard completion")
+	}
+	if finalCfg.System.AdminHash == "" {
+		t.Error("expected admin hash to be set after wizard completion")
 	}
 
 	// Verify wizard is blocked now.

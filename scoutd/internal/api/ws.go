@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/scoututm/scoutd/internal/ws"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 const wsIdleTimeout = 5 * time.Minute

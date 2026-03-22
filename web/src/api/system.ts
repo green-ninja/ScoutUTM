@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { SystemConfig, HealthResponse, SystemAbout } from './types'
+import type { SystemConfig, HealthResponse, SystemAbout, ThroughputSample, Connection } from './types'
 
 export async function getSystem(): Promise<SystemConfig> {
   return apiFetch<SystemConfig>('/system')
@@ -59,4 +59,12 @@ export async function changePassword(current: string, newPassword: string): Prom
     method: 'POST',
     body: JSON.stringify({ current, new_password: newPassword }),
   })
+}
+
+export async function getStatsHistory(range_: string): Promise<ThroughputSample[]> {
+  return apiFetch<ThroughputSample[]>(`/stats/history?range=${range_}`)
+}
+
+export async function getConnections(): Promise<Connection[]> {
+  return apiFetch<Connection[]>('/stats/connections')
 }

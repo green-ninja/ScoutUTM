@@ -78,11 +78,24 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
-  // Wizard route: accessible without auth (uses its own auth for API calls).
+  // Wizard route: accessible without auth.
   if (to.name === 'wizard') return
+
+  // Check if setup wizard needs to run (unauthenticated health endpoint).
+  if (to.name === 'login') {
+    try {
+      const res = await fetch('/api/v1/health')
+      const health = await res.json()
+      if (health.setup_done === false) {
+        return { name: 'wizard' }
+      }
+    } catch {
+      // Server unreachable — stay on login
+    }
+  }
 
   if (to.name !== 'login' && !auth.isAuthenticated) {
     return { name: 'login' }

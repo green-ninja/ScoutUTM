@@ -112,6 +112,22 @@ export interface StatsSnapshot {
   dns_blocked: number
 }
 
+export interface ThroughputSample {
+  timestamp: number
+  rx_bps: number
+  tx_bps: number
+}
+
+export interface Connection {
+  proto: string
+  state: string
+  src_ip: string
+  src_port?: number
+  dst_ip: string
+  dst_port?: number
+  bytes: number
+}
+
 export interface HealthResponse {
   healthy: boolean
   uptime: number

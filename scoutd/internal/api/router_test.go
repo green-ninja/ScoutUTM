@@ -39,18 +39,17 @@ func testServer(t *testing.T) (*Server, func()) {
 	return srv, func() {}
 }
 
-// testScanner creates a scanner with temp ARP and lease files for testing.
+// testScanner creates a scanner with temp neigh and lease files for testing.
 func testScanner(t *testing.T, dir string) *netmon.Scanner {
 	t.Helper()
-	arpFile := filepath.Join(dir, "arp")
-	arpData := "IP address       HW type     Flags       HW address            Mask     Device\n" +
-		"192.168.1.100    0x1         0x2         aa:bb:cc:dd:ee:01     *        eth1\n" +
-		"192.168.1.101    0x1         0x2         aa:bb:cc:dd:ee:02     *        eth1\n" +
-		"192.168.1.102    0x1         0x2         aa:bb:cc:dd:ee:03     *        eth1\n" +
-		"192.168.1.103    0x1         0x2         aa:bb:cc:dd:ee:04     *        eth1\n" +
-		"192.168.1.104    0x1         0x2         aa:bb:cc:dd:ee:05     *        eth1\n" +
-		"192.168.1.105    0x1         0x2         aa:bb:cc:dd:ee:06     *        eth1\n"
-	os.WriteFile(arpFile, []byte(arpData), 0644)
+	neighFile := filepath.Join(dir, "neigh")
+	neighData := "192.168.1.100 dev eth1 lladdr aa:bb:cc:dd:ee:01 REACHABLE\n" +
+		"192.168.1.101 dev eth1 lladdr aa:bb:cc:dd:ee:02 REACHABLE\n" +
+		"192.168.1.102 dev eth1 lladdr aa:bb:cc:dd:ee:03 REACHABLE\n" +
+		"192.168.1.103 dev eth1 lladdr aa:bb:cc:dd:ee:04 REACHABLE\n" +
+		"192.168.1.104 dev eth1 lladdr aa:bb:cc:dd:ee:05 REACHABLE\n" +
+		"192.168.1.105 dev eth1 lladdr aa:bb:cc:dd:ee:06 REACHABLE\n"
+	os.WriteFile(neighFile, []byte(neighData), 0644)
 
 	leaseFile := filepath.Join(dir, "leases")
 	leaseData := "1999999999 aa:bb:cc:dd:ee:01 192.168.1.100 laptop 01:aa:bb:cc:dd:ee:01\n" +
@@ -62,7 +61,7 @@ func testScanner(t *testing.T, dir string) *netmon.Scanner {
 	os.WriteFile(leaseFile, []byte(leaseData), 0644)
 
 	s := netmon.NewScanner(leaseFile)
-	s.SetARPFile(arpFile)
+	s.SetNeighFile(neighFile)
 	return s
 }
 

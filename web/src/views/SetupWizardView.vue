@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { wizardStep } from '@/api/wizard'
 import { getSystem } from '@/api/system'
@@ -19,6 +19,8 @@ const interfaces = ref<{ name: string; zone: string; type: string }[]>([])
 
 // Step 4: LAN config
 const lanAddress = ref('192.168.1.1/24')
+const wanIface = computed(() => interfaces.value.find(i => i.zone === 'wan'))
+const lanIface = computed(() => interfaces.value.find(i => i.zone === 'lan'))
 
 // Step 5: Security
 const idsEnabled = ref(true)
@@ -27,6 +29,14 @@ const blockThreats = ref(true)
 
 // Step 6: VLANs (optional, simplified)
 const skipVLAN = ref(true)
+
+// Fetch interfaces whenever step 3 is entered (forward or back).
+watch(step, async (s) => {
+  if (s === 3) {
+    const resp = await wizardStep(3)
+    if (resp.interfaces) interfaces.value = resp.interfaces
+  }
+})
 
 onMounted(async () => {
   try {
@@ -71,8 +81,7 @@ async function next() {
         break
       }
       case 3: {
-        const resp = await wizardStep(3)
-        if (resp.interfaces) interfaces.value = resp.interfaces
+        // Interfaces already loaded by watch; just advance.
         break
       }
       case 4: {
@@ -92,7 +101,7 @@ async function next() {
         break
       }
       case 7: {
-        await wizardStep(7)
+        await wizardStep(7, { password: password.value })
         router.push('/login')
         return
       }
@@ -184,10 +193,28 @@ function back() {
         <!-- Step 4: LAN Config -->
         <div v-if="step === 4" class="space-y-4">
           <h2 class="text-xl font-bold text-white">LAN Configuration</h2>
-          <p class="text-gray-400 text-sm">Configure your local network settings.</p>
+          <p class="text-gray-400 text-sm">Set the IP address for your local network. Devices on the LAN will use this as their gateway and DNS server.</p>
+
+          <!-- Network layout summary -->
+          <div class="glass rounded-xl p-4 space-y-2 text-sm">
+            <div v-if="wanIface" class="flex items-center gap-3">
+              <span class="px-2 py-0.5 rounded text-xs bg-red-900 text-red-300 w-10 text-center">WAN</span>
+              <span class="text-white font-mono">{{ wanIface.name }}</span>
+              <span class="text-gray-500">— internet uplink (DHCP)</span>
+            </div>
+            <div v-if="lanIface" class="flex items-center gap-3">
+              <span class="px-2 py-0.5 rounded text-xs bg-green-900 text-green-300 w-10 text-center">LAN</span>
+              <span class="text-white font-mono">{{ lanIface.name }}</span>
+              <span class="text-gray-500">— your local network</span>
+            </div>
+          </div>
+
           <div>
-            <label class="block text-sm text-gray-400 mb-1">LAN IP Address (CIDR)</label>
+            <label class="block text-sm text-gray-400 mb-1">
+              LAN IP Address<span v-if="lanIface"> (<span class="font-mono">{{ lanIface.name }}</span>)</span>
+            </label>
             <input v-model="lanAddress" class="w-full px-3 py-2 bg-scout-700 border border-scout-600 rounded text-white text-sm font-mono" placeholder="192.168.1.1/24" />
+            <p class="mt-1 text-xs text-gray-500">CIDR notation, e.g. 192.168.1.1/24. Devices will get IPs via DHCP in this subnet.</p>
           </div>
         </div>
 

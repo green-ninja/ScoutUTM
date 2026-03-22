@@ -121,9 +121,10 @@ func main() {
 	// WebSocket hub.
 	hub := ws.NewHub()
 
-	// Stats collector + broadcast goroutine.
+	// Stats collector + history buffer + broadcast goroutine.
 	wanIface := wanInterfaceName(store.Current())
 	collector := stats.NewCollector(wanIface)
+	statsHistory := stats.NewHistory(43200) // 24h at ~2s intervals
 	statsCtx, statsCancel := context.WithCancel(context.Background())
 	go func() {
 		ticker := time.NewTicker(hub.StatsInterval())
@@ -133,12 +134,13 @@ func main() {
 			case <-statsCtx.Done():
 				return
 			case <-ticker.C:
-				if hub.ClientCount() == 0 {
-					continue
-				}
 				snap, err := collector.Collect()
 				if err != nil {
 					log.Printf("stats collect: %v", err)
+					continue
+				}
+				statsHistory.Record(snap)
+				if hub.ClientCount() == 0 {
 					continue
 				}
 				msg, err := json.Marshal(map[string]interface{}{
@@ -172,14 +174,10 @@ func main() {
 		log.Printf("warning: initial template render: %v", err)
 	}
 
-	// Service manager. In dev mode (Vagrant VM), only nftables reloads are
-	// stubbed (SSH safety). All other daemons reload normally.
-	var svcMgr *service.Manager
-	if devMode {
-		svcMgr = service.NewVMManager()
-	} else {
-		svcMgr = service.NewManager(false)
-	}
+	// Service manager. In dev mode, all daemons still reload normally —
+	// the nftables template includes SSH rules when dev-mode is enabled,
+	// so there is no risk of locking out Vagrant SSH.
+	svcMgr := service.NewManager(false)
 
 	// EVE alert reader.
 	eveReader := ids.NewReader(
@@ -261,6 +259,7 @@ func main() {
 	// API server.
 	srv := api.NewServer(store, sessions, hub, engine, svcMgr, eveReader, scanner, devMode, version)
 	srv.DNSLogger = dnsLogger
+	srv.StatsHistory = statsHistory
 	router := srv.Router()
 
 	// Register cleanup tasks (after srv is created so we can access RateLimiter).
@@ -326,8 +325,8 @@ func main() {
 		},
 	})
 
-	// TLS.
-	if err := ensureTLSCert(tlsDir); err != nil {
+	// TLS — generate cert with LAN IPs from config.
+	if err := ensureTLSCert(tlsDir, store.Current()); err != nil {
 		log.Fatalf("TLS setup: %v", err)
 	}
 
@@ -412,13 +411,18 @@ func main() {
 	log.Println("scoutd stopped")
 }
 
-// ensureTLSCert generates a self-signed ECDSA P-256 certificate if none exists.
-func ensureTLSCert(dir string) error {
+// ensureTLSCert generates a self-signed ECDSA P-256 certificate if none exists
+// or if the existing certificate expires within 30 days.
+func ensureTLSCert(dir string, cfg *config.Config) error {
 	certFile := filepath.Join(dir, "server.crt")
 	keyFile := filepath.Join(dir, "server.key")
 
-	if _, err := os.Stat(certFile); err == nil {
-		return nil // Already exists.
+	ips := lanIPs(cfg)
+
+	if reason := certNeedsRegen(certFile, ips); reason == "" {
+		return nil
+	} else {
+		log.Printf("TLS cert: %s", reason)
 	}
 
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -439,11 +443,11 @@ func ensureTLSCert(dir string) error {
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: "scout.local"},
 		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(2 * 365 * 24 * time.Hour), // ~2 years
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour), // 1 year
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     []string{"scout.local", "localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("192.168.1.1")},
+		IPAddresses:  ips,
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
@@ -465,8 +469,60 @@ func ensureTLSCert(dir string) error {
 		return fmt.Errorf("writing key: %w", err)
 	}
 
-	log.Printf("generated self-signed TLS cert in %s", dir)
+	log.Printf("generated self-signed TLS cert in %s (IPs: %v)", dir, ips)
 	return nil
+}
+
+// certNeedsRegen returns a reason string if the cert should be regenerated,
+// or empty string if the existing cert is fine.
+func certNeedsRegen(certFile string, wantIPs []net.IP) string {
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return "generating new certificate"
+	}
+
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return "existing cert is not valid PEM"
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Sprintf("existing cert is corrupt: %v", err)
+	}
+
+	if time.Until(cert.NotAfter) < 30*24*time.Hour {
+		return fmt.Sprintf("existing cert expires %s, regenerating", cert.NotAfter.Format("2006-01-02"))
+	}
+
+	// Check that all configured LAN IPs are present in the cert SANs.
+	certIPs := make(map[string]bool, len(cert.IPAddresses))
+	for _, ip := range cert.IPAddresses {
+		certIPs[ip.String()] = true
+	}
+	for _, ip := range wantIPs {
+		if !certIPs[ip.String()] {
+			return fmt.Sprintf("cert missing IP SAN %s", ip)
+		}
+	}
+
+	return ""
+}
+
+// lanIPs returns 127.0.0.1 plus all non-WAN interface IPs from config.
+func lanIPs(cfg *config.Config) []net.IP {
+	ips := []net.IP{net.ParseIP("127.0.0.1")}
+	for _, iface := range cfg.Network.Interfaces {
+		if iface.Zone == "wan" || iface.IPv4Address == "" {
+			continue
+		}
+		host, _, err := net.ParseCIDR(iface.IPv4Address)
+		if err != nil {
+			continue
+		}
+		ips = append(ips, host)
+	}
+	return ips
 }
 
 func wanInterfaceName(cfg *config.Config) string {

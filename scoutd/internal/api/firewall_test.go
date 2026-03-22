@@ -62,62 +62,72 @@ func TestCRUDRules(t *testing.T) {
 	token := loginAndGetToken(t, srv, "test")
 	router := srv.Router()
 
+	// Get initial rule count (default config has pre-populated block rules).
+	req := httptest.NewRequest("GET", "/api/v1/firewall/rules", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var rules []config.FirewallRule
+	json.Unmarshal(w.Body.Bytes(), &rules)
+	initialCount := len(rules)
+
 	// Create rule.
 	rule := config.FirewallRule{Name: "test", Src: "lan", Dest: "wan", Proto: "tcp", Port: 80, Action: "drop"}
 	body, _ := json.Marshal(rule)
 
-	req := httptest.NewRequest("POST", "/api/v1/firewall/rules", bytes.NewReader(body))
+	req = httptest.NewRequest("POST", "/api/v1/firewall/rules", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
+	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("POST /firewall/rules: status = %d, body = %s", w.Code, w.Body.String())
 	}
 
-	// Get rules — should have 1.
+	// Get rules — should have initialCount + 1.
 	req = httptest.NewRequest("GET", "/api/v1/firewall/rules", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	var rules []config.FirewallRule
 	json.Unmarshal(w.Body.Bytes(), &rules)
-	if len(rules) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(rules))
+	if len(rules) != initialCount+1 {
+		t.Fatalf("expected %d rules, got %d", initialCount+1, len(rules))
 	}
 
-	// Update rule.
+	// Update the new rule (last index).
+	lastIdx := len(rules) - 1
 	rule.Port = 443
 	body, _ = json.Marshal(rule)
-	req = httptest.NewRequest("PUT", "/api/v1/firewall/rules/0", bytes.NewReader(body))
+	req = httptest.NewRequest("PUT", "/api/v1/firewall/rules/"+itoa(lastIdx), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("PUT /firewall/rules/0: status = %d", w.Code)
+		t.Fatalf("PUT /firewall/rules/%d: status = %d", lastIdx, w.Code)
 	}
 
-	// Delete rule.
-	req = httptest.NewRequest("DELETE", "/api/v1/firewall/rules/0", nil)
+	// Delete the new rule.
+	req = httptest.NewRequest("DELETE", "/api/v1/firewall/rules/"+itoa(lastIdx), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("DELETE /firewall/rules/0: status = %d", w.Code)
+		t.Fatalf("DELETE /firewall/rules/%d: status = %d", lastIdx, w.Code)
 	}
 
-	// Verify empty.
+	// Verify back to initial count.
 	req = httptest.NewRequest("GET", "/api/v1/firewall/rules", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	json.Unmarshal(w.Body.Bytes(), &rules)
-	if len(rules) != 0 {
-		t.Errorf("expected 0 rules after delete, got %d", len(rules))
+	if len(rules) != initialCount {
+		t.Errorf("expected %d rules after delete, got %d", initialCount, len(rules))
 	}
 }
 

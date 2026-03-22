@@ -19,8 +19,14 @@ func reloadDaemon(name string) error {
 	case Suricata:
 		return runCmd("rc-service", "suricata", "restart")
 	case WireGuard:
-		// Stub — will be implemented in Month 4.
-		return runCmd("wg", "syncconf", "wg0", "/etc/wireguard/wg0.conf")
+		// Create wg0 if it doesn't exist, then apply config.
+		_ = runCmd("ip", "link", "add", "dev", "wg0", "type", "wireguard")
+		if err := runCmd("wg", "setconf", "wg0", "/etc/wireguard.conf"); err != nil {
+			return err
+		}
+		// Re-apply address and bring up (idempotent).
+		_ = runCmd("ip", "link", "set", "wg0", "up")
+		return nil
 	default:
 		return fmt.Errorf("unknown daemon: %s", name)
 	}

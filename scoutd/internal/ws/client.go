@@ -3,7 +3,7 @@ package ws
 import (
 	"context"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Client represents a WebSocket connection.

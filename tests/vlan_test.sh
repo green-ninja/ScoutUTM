@@ -96,9 +96,6 @@ else
   fail "VLAN 30 creation failed: $RESP"
 fi
 
-# Reload nftables — dev-mode stubs service reloads, so apply rendered config manually.
-nft -f /etc/nftables.conf 2>/dev/null || true
-
 # Test 7: Verify nftables has VLAN sub-interface in zone set.
 echo "[7] nftables zone sets include VLAN interfaces"
 if nft list table inet scout 2>/dev/null | grep -q "eth1.20"; then

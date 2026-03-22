@@ -46,4 +46,24 @@ Vagrant.configure("2") do |config|
     # Provision: DHCP, routing, connectivity checks.
     client.vm.provision "shell", path: "tools/client-provision.sh"
   end
+
+  # ── VLAN Client VM (IoT zone, VLAN 20) ──
+  config.vm.define "client2" do |client2|
+    client2.vm.box = "generic/alpine319"
+    client2.vm.box_version = "~> 4.3.0"
+    client2.vm.hostname = "scout-client2"
+
+    client2.vm.provider "virtualbox" do |vb|
+      vb.cpus = 1
+      vb.memory = 512
+      vb.name = "scout-client2"
+    end
+
+    # Same internal network — uses 802.1Q VLAN tagging (VLAN 20) to reach
+    # the IoT subnet. VirtualBox internal networks pass tagged frames.
+    client2.vm.network "private_network", auto_config: false, virtualbox__intnet: "scoutlan"
+
+    # Provision: create IoT VLAN via UTM API, set up VLAN tagging, run VLAN tests.
+    client2.vm.provision "shell", path: "tools/client2-provision.sh"
+  end
 end

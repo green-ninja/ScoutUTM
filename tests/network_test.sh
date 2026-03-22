@@ -12,9 +12,6 @@ fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 echo "=== Network Integration Tests ==="
 echo ""
 
-# Ensure scout nftables rules are loaded (dev-mode stubs service reloads).
-nft -f /etc/nftables.conf 2>/dev/null || true
-
 # Test 1: nftables rules loaded.
 echo "[1] nftables rules loaded"
 if nft list table inet scout >/dev/null 2>&1; then

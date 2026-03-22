@@ -1,0 +1,47 @@
+# Kernel
+linux-lts
+linux-firmware-rtl_nic
+
+# Partition management (first-boot resize)
+gptfdisk
+
+# Security
+nftables
+suricata
+suricata-update
+unbound
+wireguard-tools
+
+# Network
+dnsmasq
+iproute2
+conntrack-tools
+
+# Time
+chrony
+fake-hwclock
+
+# System
+openrc
+busybox
+alpine-baselayout
+musl
+e2fsprogs
+squashfs-tools
+grub-efi
+
+# Reliability
+watchdog
+jemalloc
+
+# Integrity
+cryptsetup
+
+# OTA
+rauc
+
+# TLS + Utils
+openssl
+jq
+curl
+ca-certificates

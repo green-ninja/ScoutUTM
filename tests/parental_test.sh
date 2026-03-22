@@ -43,20 +43,14 @@ api_delete() {
   $CURL -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1$1"
 }
 
-# Test 1: Create a parental profile.
-echo "[1] Create parental profile"
-RESP=$(api_post "/parental/profiles" '{
-  "name": "Kids",
-  "block_categories": ["adult", "gambling"],
-  "safe_search": true,
-  "youtube_restricted": true,
-  "schedule": {"enabled": true, "start_time": "21:00", "end_time": "07:00", "days": []}
-}')
-PROFILE_ID=$(echo "$RESP" | jq -r '.id // empty')
+# Test 1: Use existing default "Kids" profile (ships in default config).
+echo "[1] Get default parental profile"
+RESP=$(api_get "/parental/profiles")
+PROFILE_ID=$(echo "$RESP" | jq -r '.[0].id // empty')
 if [ -n "$PROFILE_ID" ]; then
-  pass "created profile Kids (id=$PROFILE_ID)"
+  pass "default profile found (id=$PROFILE_ID)"
 else
-  fail "failed to create profile: $RESP"
+  fail "no default profile found: $RESP"
 fi
 
 # Test 2: List profiles — should have our new profile.
@@ -192,11 +186,10 @@ else
   fail "dns/query-log did not return array: $RESP"
 fi
 
-# Cleanup: delete the test profile.
-echo "[cleanup] Delete test profile"
-if [ -n "$PROFILE_ID" ]; then
-  api_delete "/parental/profiles/$PROFILE_ID" >/dev/null 2>&1
-  pass "cleaned up test profile"
+# Cleanup: unassign device from profile (keep the default profile).
+echo "[cleanup] Unassign device"
+if [ -n "$FIRST_MAC" ]; then
+  api_put "/devices/$FIRST_MAC" '{"profile_id":""}' >/dev/null 2>&1
 fi
 
 # Summary.

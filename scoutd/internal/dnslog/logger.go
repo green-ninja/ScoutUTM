@@ -139,7 +139,7 @@ func (l *Logger) buildEntry(epochStr, clientIP, domain, rcode string) Entry {
 	}
 
 	action := "allow"
-	if rcode == "NXDOMAIN" || rcode == "REFUSED" {
+	if rcode == "NXDOMAIN" || rcode == "REFUSED" || rcode == "SERVFAIL" {
 		action = "block"
 	}
 

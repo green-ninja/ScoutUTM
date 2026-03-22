@@ -63,6 +63,47 @@ func TestRenderNftables_IPv6Drop(t *testing.T) {
 	}
 }
 
+func TestRenderNftables_AntiSpoofing_Production(t *testing.T) {
+	tmplDir := filepath.Join("..", "..", "templates")
+	outputDir := t.TempDir()
+	e := NewEngine(tmplDir, outputDir, false) // production mode
+	cfg := testConfig()
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(outputDir, "nftables.conf"))
+	content := string(data)
+
+	if !strings.Contains(content, "set bogons") {
+		t.Error("expected bogons set in production mode")
+	}
+	if !strings.Contains(content, "ip saddr @bogons drop") {
+		t.Error("expected anti-spoofing rule in production mode")
+	}
+}
+
+func TestRenderNftables_AntiSpoofing_DevMode(t *testing.T) {
+	e := testEngine(t) // dev mode
+	cfg := testConfig()
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	// Anti-spoofing should NOT be present in dev mode (breaks VirtualBox NAT).
+	if strings.Contains(content, "set bogons") {
+		t.Error("bogons set should not exist in dev mode")
+	}
+	if strings.Contains(content, "ip saddr @bogons") {
+		t.Error("anti-spoofing rule should not exist in dev mode")
+	}
+}
+
 func TestRenderNftables_DNSRedirect(t *testing.T) {
 	e := testEngine(t)
 	cfg := testConfig()
@@ -222,6 +263,99 @@ func TestRenderNftables_CustomRules(t *testing.T) {
 
 	if !strings.Contains(content, "tcp dport 22 drop") {
 		t.Error("expected custom rule: tcp dport 22 drop")
+	}
+}
+
+func TestRenderNftables_CustomRules_BeforeForwardings(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.Firewall.Rules = []config.FirewallRule{
+		{Name: "Block HTTP", Src: "lan", Dest: "wan", Proto: "tcp", Port: 80, Action: "drop"},
+	}
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	// Custom rules must appear before zone forwardings so deny rules take effect.
+	rulePos := strings.Index(content, "tcp dport 80 drop")
+	fwdPos := strings.Index(content, "iifname @lan_devices oifname @wan_devices accept")
+	if rulePos < 0 {
+		t.Fatal("custom rule not found in output")
+	}
+	if fwdPos < 0 {
+		t.Fatal("forwarding rule not found in output")
+	}
+	if rulePos > fwdPos {
+		t.Error("custom rules must render before zone forwardings")
+	}
+}
+
+func TestRenderNftables_CustomRules_AnyProtoWithPort(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.Firewall.Rules = []config.FirewallRule{
+		{Name: "Block HTTP any proto", Src: "lan", Dest: "wan", Proto: "", Port: 80, Action: "drop"},
+	}
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	// When proto is empty but port is set, should match both tcp and udp.
+	if !strings.Contains(content, "meta l4proto { tcp, udp } th dport 80 drop") {
+		t.Errorf("expected 'meta l4proto { tcp, udp } th dport 80 drop', got:\n%s", content)
+	}
+}
+
+func TestRenderNftables_CustomRules_ProtoOnlyNoPort(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig()
+	cfg.Firewall.Rules = []config.FirewallRule{
+		{Name: "Block ICMP", Src: "lan", Dest: "wan", Proto: "icmp", Port: 0, Action: "drop"},
+	}
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	if !strings.Contains(content, "meta l4proto icmp drop") {
+		t.Errorf("expected 'meta l4proto icmp drop', got:\n%s", content)
+	}
+}
+
+func TestRenderNftables_DefaultBlockRules(t *testing.T) {
+	e := testEngine(t)
+	cfg := testConfig() // DefaultConfig() now has default block rules
+
+	if err := e.RenderNftables(cfg); err != nil {
+		t.Fatalf("RenderNftables: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(e.outputDir, "nftables.conf"))
+	content := string(data)
+
+	// Default config should block Telnet, SMB, NetBIOS, RPC.
+	if !strings.Contains(content, "tcp dport 23 drop") {
+		t.Error("expected default Telnet block rule")
+	}
+	if !strings.Contains(content, "tcp dport 445 drop") {
+		t.Error("expected default SMB block rule")
+	}
+	if !strings.Contains(content, "tcp dport 139 drop") {
+		t.Error("expected default NetBIOS block rule")
+	}
+	if !strings.Contains(content, "tcp dport 135 drop") {
+		t.Error("expected default RPC block rule")
 	}
 }
 

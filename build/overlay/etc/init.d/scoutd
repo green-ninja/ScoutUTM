@@ -1,0 +1,24 @@
+#!/sbin/openrc-run
+
+name="scoutd"
+description="ScoutUTM management daemon"
+command="/usr/sbin/scoutd"
+command_args=""
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/scoutd.log"
+error_log="/var/log/scoutd.log"
+
+depend() {
+	need net
+	after nftables dnsmasq unbound chrony
+}
+
+start_pre() {
+	checkpath -d -m 0700 /etc/scout/tls
+	checkpath -d -m 0755 /var/lib/scout
+	checkpath -d -m 0755 /var/lib/scout/suricata
+	checkpath -d -m 0755 /var/lib/scout/suricata/rules
+	checkpath -d -m 0755 /var/lib/scout/logs
+	checkpath -d -m 0755 /var/lib/scout/blocklists
+}

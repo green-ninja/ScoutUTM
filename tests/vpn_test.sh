@@ -85,9 +85,6 @@ else
   fail "WireGuard config file not found"
 fi
 
-# Reload nftables — dev-mode stubs service reloads, so apply rendered config manually.
-nft -f /etc/nftables.conf 2>/dev/null || true
-
 # Test 4: nftables allows WireGuard UDP port on WAN.
 echo "[4] nftables WireGuard port rule"
 if nft list chain inet scout input_wan 2>/dev/null | grep -q "udp dport 51820 accept"; then

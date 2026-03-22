@@ -100,17 +100,20 @@ else
   fail "DELETE /firewall/rules/0 failed: $RESP"
 fi
 
-# Test 5: PUT /system partial update.
-echo "[5] PUT /system partial update"
-RESP=$(api_put "/system" '{"hostname":"test-router"}')
+# Test 5: PATCH /system partial update.
+echo "[5] PATCH /system partial update"
+api_patch() {
+  $CURL -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" "$BASE_URL/api/v1$1"
+}
+RESP=$(api_patch "/system" '{"hostname":"test-router"}')
 if echo "$RESP" | jq -e '.hostname == "test-router"' >/dev/null 2>&1; then
-  pass "PUT /system updates hostname"
+  pass "PATCH /system updates hostname"
 else
-  fail "PUT /system failed: $RESP"
+  fail "PATCH /system failed: $RESP"
 fi
 
 # Restore hostname.
-api_put "/system" '{"hostname":"scoututm"}' >/dev/null
+api_patch "/system" '{"hostname":"scoututm"}' >/dev/null
 
 # Test 6: Protected zones.
 echo "[6] Protected zones"

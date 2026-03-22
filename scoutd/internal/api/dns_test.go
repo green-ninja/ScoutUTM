@@ -180,6 +180,7 @@ func TestPutDNS_RapidConcurrentChanges(t *testing.T) {
 	router := srv.Router()
 
 	// Fire 3 concurrent DNS config updates with different upstream servers.
+	// With TryLock, only one will succeed; others get 409 Conflict.
 	upstreams := [][]string{
 		{"1.1.1.1", "1.0.0.1"},
 		{"8.8.8.8", "8.8.4.4"},
@@ -200,25 +201,28 @@ func TestPutDNS_RapidConcurrentChanges(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+token)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
-			if w.Code == http.StatusOK {
-				done <- idx
-			} else {
-				done <- -1
-			}
+			done <- w.Code
 		}(i, up)
 	}
 
 	// Wait for all 3 to complete.
 	successCount := 0
+	conflictCount := 0
 	for range 3 {
-		idx := <-done
-		if idx >= 0 {
+		code := <-done
+		if code == http.StatusOK {
 			successCount++
+		} else if code == http.StatusConflict {
+			conflictCount++
 		}
 	}
 
-	if successCount != 3 {
-		t.Errorf("expected 3 successful applies, got %d", successCount)
+	// Exactly one should succeed; others should get 409 Conflict.
+	if successCount < 1 {
+		t.Errorf("expected at least 1 successful apply, got %d", successCount)
+	}
+	if successCount+conflictCount != 3 {
+		t.Errorf("expected success+conflict=3, got success=%d conflict=%d", successCount, conflictCount)
 	}
 
 	// Final config should be valid and consistent.

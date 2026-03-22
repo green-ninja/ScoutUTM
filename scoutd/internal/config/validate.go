@@ -24,6 +24,11 @@ var zoneNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,31}$`)
 var ifaceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,14}$`)
 var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_ -]{0,63}$`)
 var macRe = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
+
+// containsTemplateDirective checks for Go template injection characters.
+func containsTemplateDirective(s string) bool {
+	return strings.Contains(s, "{{") || strings.Contains(s, "}}")
+}
 var timezoneRe = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*|UTC|GMT)$`)
 var languageRe = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 var rulesetNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
@@ -57,6 +62,45 @@ const (
 // Validate checks a Config for semantic errors and returns all violations.
 func Validate(cfg *Config) []ValidationError {
 	var errs []ValidationError
+
+	// Reject Go template directive injection in all user-facing string fields.
+	// text/template does NOT auto-escape for config file contexts, so {{ or }}
+	// in any value could alter rendered daemon configs.
+	for _, check := range []struct {
+		field, value string
+	}{
+		{"system.hostname", cfg.System.Hostname},
+		{"vpn.wireguard.endpoint_override", cfg.VPN.WireGuard.EndpointOverride},
+	} {
+		if containsTemplateDirective(check.value) {
+			errs = append(errs, ValidationError{check.field, "must not contain template directive characters ({{ or }})"})
+		}
+	}
+	for i, z := range cfg.Network.Zones {
+		if containsTemplateDirective(z.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].name", i), "must not contain template directive characters"})
+		}
+	}
+	for i, r := range cfg.Firewall.Rules {
+		if containsTemplateDirective(r.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].name", i), "must not contain template directive characters"})
+		}
+	}
+	for i, pf := range cfg.Firewall.PortForwards {
+		if containsTemplateDirective(pf.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.port_forwards[%d].name", i), "must not contain template directive characters"})
+		}
+	}
+	for i, p := range cfg.VPN.WireGuard.Peers {
+		if containsTemplateDirective(p.Name) || containsTemplateDirective(p.PublicKey) {
+			errs = append(errs, ValidationError{fmt.Sprintf("vpn.wireguard.peers[%d]", i), "must not contain template directive characters"})
+		}
+	}
+	for i, p := range cfg.Parental.Profiles {
+		if containsTemplateDirective(p.Name) {
+			errs = append(errs, ValidationError{fmt.Sprintf("parental.profiles[%d].name", i), "must not contain template directive characters"})
+		}
+	}
 
 	// Version.
 	if cfg.Version < 1 || cfg.Version > CurrentSchemaVersion {
@@ -190,6 +234,23 @@ func Validate(cfg *Config) []ValidationError {
 		}
 		if rule.Port != 0 && (rule.Port < 1 || rule.Port > 65535) {
 			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d].port", i), "must be between 1 and 65535"})
+		}
+		// CFG-4: Prevent admin lockout — reject rules that would block
+		// management access (HTTPS) from the LAN zone to the appliance.
+		// Rules with a Dest zone are forwarding rules (through the appliance),
+		// not input rules (to the appliance). Only flag rules without a Dest
+		// or with Dest matching the LAN zone itself (input traffic).
+		if rule.Action != "accept" && rule.Src == "lan" && rule.Dest == "" &&
+			(rule.Proto == "tcp" || rule.Proto == "") &&
+			(rule.Port == 443 || rule.Port == 80 || rule.Port == 8443) {
+			errs = append(errs, ValidationError{fmt.Sprintf("firewall.rules[%d]", i), "cannot block management ports (80, 443, 8443) from LAN zone — this would lock out admin access"})
+		}
+	}
+
+	// Validate LAN zone has accept input policy (lockout protection).
+	for i, z := range cfg.Network.Zones {
+		if z.Name == "lan" && z.InputPolicy != "accept" {
+			errs = append(errs, ValidationError{fmt.Sprintf("network.zones[%d].input_policy", i), "LAN zone input policy must be \"accept\" — changing it would lock out admin access"})
 		}
 	}
 
@@ -387,9 +448,9 @@ func Validate(cfg *Config) []ValidationError {
 	profileIDs := make(map[string]bool)
 	profileNames := make(map[string]bool)
 	profileTagNames := make(map[string]bool) // sanitized tag names for collision detection
+	// Must match blocklist.Categories() — only categories with zone files.
 	validParentalCategories := map[string]bool{
-		"social_media": true, "gaming": true, "adult": true, "streaming": true,
-		"gambling": true, "drugs": true, "weapons": true, "malware": true,
+		"adult": true, "gambling": true, "gaming": true, "social_media": true, "streaming": true,
 	}
 	for i, p := range cfg.Parental.Profiles {
 		if p.ID == "" {
@@ -456,12 +517,38 @@ func Validate(cfg *Config) []ValidationError {
 	if cfg.Update.ServerURL != "" {
 		if !strings.HasPrefix(cfg.Update.ServerURL, "https://") {
 			errs = append(errs, ValidationError{"update.server_url", "must use HTTPS"})
-		} else if isPrivateURL(cfg.Update.ServerURL) {
-			errs = append(errs, ValidationError{"update.server_url", "must not point to a private/internal IP address"})
+		} else if !isAllowedUpdateHost(cfg.Update.ServerURL) {
+			errs = append(errs, ValidationError{"update.server_url", "must use an authorized update server"})
 		}
 	}
 
 	return errs
+}
+
+// allowedUpdateHosts is the hardcoded allowlist of domains permitted for OTA updates.
+var allowedUpdateHosts = []string{
+	"update.scoututm.com",
+	"update.zenti.sh",
+}
+
+// isAllowedUpdateHost checks if a URL's host is on the OTA update allowlist.
+func isAllowedUpdateHost(rawURL string) bool {
+	host := rawURL
+	if idx := strings.Index(host, "://"); idx >= 0 {
+		host = host[idx+3:]
+	}
+	if idx := strings.IndexByte(host, '/'); idx >= 0 {
+		host = host[:idx]
+	}
+	if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
+		host = host[:idx]
+	}
+	for _, allowed := range allowedUpdateHosts {
+		if strings.EqualFold(host, allowed) {
+			return true
+		}
+	}
+	return false
 }
 
 // isPrivateURL checks if a URL's host resolves to a private/internal IP range.

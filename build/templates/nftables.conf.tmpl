@@ -15,10 +15,22 @@ table inet scout {
 {{- end}}
 {{- end}}
 
+{{- if not .DevMode}}
+	set bogons {
+		type ipv4_addr
+		flags interval
+		elements = { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 }
+	}
+{{- end}}
+
 	chain prerouting_raw {
 		type filter hook prerouting priority raw; policy accept;
 		# Drop all IPv6 traffic.
 		meta nfproto ipv6 drop
+{{- if not .DevMode}}
+		# Anti-spoofing: drop packets with private/bogon source IPs arriving on WAN.
+		iifname @wan_devices ip saddr @bogons drop
+{{- end}}
 	}
 
 	chain prerouting {
@@ -131,19 +143,23 @@ table inet scout {
 {{- end}}
 {{- end}}
 {{- end}}
+{{- range .Rules}}
+		# Rule: {{.Name}}
+{{- if and .Port (ne .Proto "")}}
+		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices {{.Proto}} dport {{.Port}} {{.Action}}
+{{- else if .Port}}
+		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices meta l4proto { tcp, udp } th dport {{.Port}} {{.Action}}
+{{- else if (ne .Proto "")}}
+		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices meta l4proto {{.Proto}} {{.Action}}
+{{- else}}
+		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices {{.Action}}
+{{- end}}
+{{- end}}
 {{- range .Forwardings}}
 {{- $src_ifaces := index $.ZoneInterfaces .Src}}
 {{- $dest_ifaces := index $.ZoneInterfaces .Dest}}
 {{- if and $src_ifaces $dest_ifaces}}
 		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices accept
-{{- end}}
-{{- end}}
-{{- range .Rules}}
-		# Rule: {{.Name}}
-{{- if and .Port (ne .Proto "")}}
-		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices {{.Proto}} dport {{.Port}} {{.Action}}
-{{- else}}
-		iifname @{{.Src}}_devices oifname @{{.Dest}}_devices {{.Action}}
 {{- end}}
 {{- end}}
 {{- if .PortForwards}}

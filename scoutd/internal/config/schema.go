@@ -203,7 +203,12 @@ func DefaultConfig() *Config {
 			Forwardings: []ForwardingRule{
 				{Src: "lan", Dest: "wan"},
 			},
-			Rules:        []FirewallRule{},
+			Rules: []FirewallRule{
+				{Name: "Block Telnet", Src: "lan", Dest: "wan", Proto: "tcp", Port: 23, Action: "drop"},
+				{Name: "Block SMB", Src: "lan", Dest: "wan", Proto: "tcp", Port: 445, Action: "drop"},
+				{Name: "Block NetBIOS", Src: "lan", Dest: "wan", Proto: "tcp", Port: 139, Action: "drop"},
+				{Name: "Block RPC", Src: "lan", Dest: "wan", Proto: "tcp", Port: 135, Action: "drop"},
+			},
 			PortForwards: []PortForward{},
 		},
 		DNS: DNSConfig{

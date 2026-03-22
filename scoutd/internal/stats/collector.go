@@ -1,11 +1,14 @@
 package stats
 
 import (
+	"sync"
 	"time"
 )
 
 // Collector gathers system statistics.
+// Not safe for concurrent use from multiple goroutines without the mutex.
 type Collector struct {
+	mu       sync.Mutex
 	wanIface string
 	prevCPU  cpuTimes
 	prevNet  netCounters
@@ -26,6 +29,9 @@ func NewCollector(wanIface string) *Collector {
 
 // Collect gathers a stats snapshot from /proc and system tools.
 func (c *Collector) Collect() (Snapshot, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	now := time.Now()
 	snap := Snapshot{
 		Timestamp: now.Unix(),

@@ -75,7 +75,7 @@ make scoutd && vagrant upload build/scoutd /usr/sbin/scoutd  # Deploy new binary
 - `web/` — Vue.js 3 + Vite + Tailwind CSS + Pinia frontend source
 - `build/` — Image build system (shell scripts, Alpine package list, overlay files, initramfs)
 - `tests/` — Integration test scripts (run in Vagrant VM)
-- `tools/` — Dev utilities (vagrant-provision.sh, dev-vm.sh)
+- `tools/` — Dev utilities (vagrant-provision.sh, deploy.ps1, test-vm.ps1, etc.)
 
 ## Config Apply Flow (Three-Phase Commit)
 

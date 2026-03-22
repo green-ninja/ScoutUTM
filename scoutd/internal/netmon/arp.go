@@ -4,62 +4,89 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
-type arpEntry struct {
-	IP        string
-	MAC       string
-	Interface string
+type neighEntry struct {
+	IP    string
+	MAC   string
+	Iface string
+	State string // REACHABLE, STALE, DELAY, PROBE, FAILED, INCOMPLETE
 }
 
-// readARPTable parses /proc/net/arp for IP/MAC/interface entries.
-// Skips incomplete entries (HW address 00:00:00:00:00:00, flags 0x0).
-func readARPTable() ([]arpEntry, error) {
-	return parseARPFile("/proc/net/arp")
+// readNeighTable runs `ip -4 neigh show` and parses the output.
+// Unlike /proc/net/arp, this includes NUD state so we can distinguish
+// REACHABLE devices from STALE entries that may have gone offline.
+func readNeighTable() ([]neighEntry, error) {
+	cmd := exec.Command("ip", "-4", "neigh", "show")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("ip neigh: %w", err)
+	}
+	return parseNeigh(bufio.NewScanner(strings.NewReader(string(out))))
 }
 
-func parseARPFile(path string) ([]arpEntry, error) {
+// parseNeighFile reads ip neigh format from a file (for testing).
+func parseNeighFile(path string) ([]neighEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("opening ARP table: %w", err)
+		return nil, fmt.Errorf("opening neigh file: %w", err)
 	}
 	defer f.Close()
-
-	return parseARP(bufio.NewScanner(f))
+	return parseNeigh(bufio.NewScanner(f))
 }
 
-// parseARP reads ARP entries from a scanner.
-// Format: IP address, HW type, Flags, HW address, Mask, Device
-func parseARP(scanner *bufio.Scanner) ([]arpEntry, error) {
-	var entries []arpEntry
-
-	// Skip header line.
-	if !scanner.Scan() {
-		return entries, nil
-	}
+// parseNeigh parses `ip -4 neigh show` output.
+// Format: <ip> dev <iface> lladdr <mac> <STATE>
+// Or:     <ip> dev <iface> <STATE> (no lladdr for FAILED/INCOMPLETE)
+func parseNeigh(scanner *bufio.Scanner) ([]neighEntry, error) {
+	var entries []neighEntry
 
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
 		fields := strings.Fields(line)
-		if len(fields) < 6 {
+		if len(fields) < 4 {
 			continue
 		}
 
 		ip := fields[0]
-		flags := fields[2]
-		mac := fields[3]
-		iface := fields[5]
 
-		// Skip incomplete entries (flags 0x0) and zero MACs.
-		if flags == "0x0" || mac == "00:00:00:00:00:00" {
+		// Find "dev" keyword.
+		var iface string
+		for i, f := range fields {
+			if f == "dev" && i+1 < len(fields) {
+				iface = fields[i+1]
+				break
+			}
+		}
+
+		// Find "lladdr" keyword.
+		var mac string
+		for i, f := range fields {
+			if f == "lladdr" && i+1 < len(fields) {
+				mac = strings.ToLower(fields[i+1])
+				break
+			}
+		}
+
+		// State is the last field.
+		state := fields[len(fields)-1]
+
+		// Skip entries without a resolved MAC (FAILED/INCOMPLETE).
+		if mac == "" {
 			continue
 		}
 
-		entries = append(entries, arpEntry{
-			IP:        ip,
-			MAC:       strings.ToLower(mac),
-			Interface: iface,
+		entries = append(entries, neighEntry{
+			IP:    ip,
+			MAC:   mac,
+			Iface: iface,
+			State: state,
 		})
 	}
 

@@ -2,6 +2,7 @@ package ids
 
 import (
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -18,13 +19,17 @@ func RotateEVELog(path string, maxBytes int64, maxFiles int) error {
 
 	// Delete oldest rotated file if at limit.
 	oldest := fmt.Sprintf("%s.%d", path, maxFiles)
-	os.Remove(oldest)
+	if err := os.Remove(oldest); err != nil && !os.IsNotExist(err) {
+		log.Printf("warning: removing oldest EVE log %s: %v", oldest, err)
+	}
 
 	// Shift existing rotated files: .6 → .7, .5 → .6, etc.
 	for i := maxFiles - 1; i >= 1; i-- {
 		src := fmt.Sprintf("%s.%d", path, i)
 		dst := fmt.Sprintf("%s.%d", path, i+1)
-		os.Rename(src, dst)
+		if err := os.Rename(src, dst); err != nil && !os.IsNotExist(err) {
+			log.Printf("warning: rotating EVE log %s → %s: %v", src, dst, err)
+		}
 	}
 
 	// Rotate current file to .1.

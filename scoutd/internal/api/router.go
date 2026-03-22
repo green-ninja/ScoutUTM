@@ -16,6 +16,7 @@ import (
 	"github.com/scoututm/scoutd/internal/netmon"
 	"github.com/scoututm/scoutd/internal/render"
 	"github.com/scoututm/scoutd/internal/service"
+	"github.com/scoututm/scoutd/internal/stats"
 	"github.com/scoututm/scoutd/internal/ws"
 	scoutweb "github.com/scoututm/scoutd/web"
 )
@@ -30,9 +31,10 @@ type Server struct {
 	Services    *service.Manager
 	EVEReader   *ids.Reader
 	Scanner     *netmon.Scanner
-	DNSLogger   *dnslog.Logger
-	DevMode     bool
-	Version     string
+	DNSLogger    *dnslog.Logger
+	StatsHistory *stats.History
+	DevMode      bool
+	Version      string
 
 	startTime time.Time
 }
@@ -89,6 +91,7 @@ func (s *Server) Router() chi.Router {
 			devicesRoutes(r, s)
 			idsRoutes(r, s)
 			parentalRoutes(r, s)
+			statsRoutes(r, s)
 		})
 	})
 
@@ -125,10 +128,16 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 
 // handleHealth returns system health status (unauthenticated).
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	cfg := s.Config.Current()
+	setupDone := false
+	if cfg != nil {
+		setupDone = cfg.System.SetupDone
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"healthy": true,
-		"uptime":  int(time.Since(s.startTime).Seconds()),
-		"version": s.Version,
+		"healthy":    true,
+		"uptime":     int(time.Since(s.startTime).Seconds()),
+		"version":    s.Version,
+		"setup_done": setupDone,
 	})
 }
 
@@ -179,7 +188,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "scout_session",
 		Value:    token,
-		Path:     "/",
+		Path:     "/api/v1",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 		Secure:   true,
@@ -199,7 +208,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "scout_session",
 		Value:    "",
-		Path:     "/",
+		Path:     "/api/v1",
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,

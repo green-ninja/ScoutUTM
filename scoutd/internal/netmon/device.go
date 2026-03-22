@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// OfflineTimeout is how long after a device was last confirmed REACHABLE
+// before it is considered offline. The Linux kernel transitions ARP entries
+// from REACHABLE to STALE after ~30s of silence, but STALE entries persist
+// indefinitely on small networks. This timeout ensures devices that have
+// truly gone offline are reflected in the UI.
+const OfflineTimeout = 5 * time.Minute
+
 // Device represents a discovered network device.
 type Device struct {
 	MAC          string    `json:"mac"`
@@ -18,26 +25,29 @@ type Device struct {
 	Manufacturer string    `json:"manufacturer"`
 }
 
-// Scanner discovers devices on the local network via ARP table and DHCP leases.
+// Scanner discovers devices on the local network via the kernel neighbor
+// table (ip neigh) and DHCP leases.
 type Scanner struct {
-	leaseFile string
-	arpFile   string
-	mu        sync.RWMutex
-	devices   map[string]*Device
+	leaseFile     string
+	neighFile     string // test override; empty = run `ip neigh` command
+	mu            sync.RWMutex
+	devices       map[string]*Device
+	lastReachable map[string]time.Time // MAC → last time seen in REACHABLE state
 }
 
 // NewScanner creates a Scanner.
 func NewScanner(leaseFile string) *Scanner {
 	return &Scanner{
-		leaseFile: leaseFile,
-		arpFile:   "/proc/net/arp",
-		devices:   make(map[string]*Device),
+		leaseFile:     leaseFile,
+		devices:       make(map[string]*Device),
+		lastReachable: make(map[string]time.Time),
 	}
 }
 
-// SetARPFile overrides the ARP table path (for testing).
-func (s *Scanner) SetARPFile(path string) {
-	s.arpFile = path
+// SetNeighFile overrides the neighbor table source (for testing).
+// The file should contain `ip -4 neigh show` format output.
+func (s *Scanner) SetNeighFile(path string) {
+	s.neighFile = path
 }
 
 // Devices returns a snapshot of all discovered devices.
@@ -51,13 +61,22 @@ func (s *Scanner) Devices() []Device {
 	return result
 }
 
-// Scan reads the ARP table and DHCP leases, merging results into the device map.
-// Devices seen in ARP are marked online; others are marked offline.
+// Scan reads the kernel neighbor table and DHCP leases, merging results
+// into the device map. Only devices in REACHABLE/DELAY/PROBE NUD state
+// are marked online. STALE devices remain online for up to OfflineTimeout
+// after they were last REACHABLE.
 func (s *Scanner) Scan() error {
-	arpEntries, err := parseARPFile(s.arpFile)
+	var entries []neighEntry
+	var err error
+	if s.neighFile != "" {
+		entries, err = parseNeighFile(s.neighFile)
+	} else {
+		entries, err = readNeighTable()
+	}
 	if err != nil {
 		return err
 	}
+
 	leases, err := readDHCPLeases(s.leaseFile)
 	if err != nil {
 		return err
@@ -79,22 +98,36 @@ func (s *Scanner) Scan() error {
 		d.Online = false
 	}
 
-	// Merge ARP entries (these are currently online).
-	for _, a := range arpEntries {
-		d, ok := s.devices[a.MAC]
+	// Merge neighbor entries.
+	for _, e := range entries {
+		d, ok := s.devices[e.MAC]
 		if !ok {
-			d = &Device{MAC: a.MAC, Manufacturer: LookupOUI(a.MAC)}
-			s.devices[a.MAC] = d
+			d = &Device{MAC: e.MAC, Manufacturer: LookupOUI(e.MAC)}
+			s.devices[e.MAC] = d
 		}
-		d.IP = a.IP
-		d.Online = true
-		d.LastSeen = now
-		if h, ok := hostnames[a.MAC]; ok && h != "" {
+		d.IP = e.IP
+
+		switch e.State {
+		case "REACHABLE", "DELAY", "PROBE":
+			d.Online = true
+			d.LastSeen = now
+			s.lastReachable[e.MAC] = now
+		case "STALE":
+			// STALE means the kernel hasn't confirmed reachability recently.
+			// Keep the device online if it was REACHABLE within the timeout.
+			if lr, ok := s.lastReachable[e.MAC]; ok && now.Sub(lr) < OfflineTimeout {
+				d.Online = true
+				d.LastSeen = now
+			}
+		// FAILED, INCOMPLETE → stays offline
+		}
+
+		if h, ok := hostnames[e.MAC]; ok && h != "" {
 			d.Hostname = h
 		}
 	}
 
-	// Merge DHCP leases for devices not already seen via ARP.
+	// Merge DHCP leases for devices not already seen via neighbor table.
 	for _, l := range leases {
 		if _, ok := s.devices[l.MAC]; !ok {
 			s.devices[l.MAC] = &Device{

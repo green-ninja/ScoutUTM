@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/scoututm/scoutd/internal/config"
 	"github.com/scoututm/scoutd/internal/netmon"
 )
+
+var deviceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_ '-]{0,63}$`)
 
 func devicesRoutes(r chi.Router, s *Server) {
 	r.Get("/devices", s.handleListDevices)
@@ -135,6 +138,10 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 
 	// Update in-memory scanner name.
 	if req.Name != nil {
+		if *req.Name != "" && !deviceNameRe.MatchString(*req.Name) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid device name — use letters, digits, spaces, hyphens, underscores, or apostrophes (max 64 chars)"})
+			return
+		}
 		s.Scanner.SetDeviceName(mac, *req.Name)
 	}
 

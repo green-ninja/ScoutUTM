@@ -1,6 +1,13 @@
 #!/bin/sh
 # client_test.sh — Runs ON the client VM, verifies end-to-end traffic through ScoutUTM.
+# Skip if not running on the client VM (test runner executes all *_test.sh on UTM).
 set -e
+
+HOSTNAME=$(hostname 2>/dev/null)
+if [ "$HOSTNAME" != "scout-client" ]; then
+  echo "SKIP: client_test.sh only runs on the client VM (current host: $HOSTNAME)"
+  exit 0
+fi
 
 PASS=0
 FAIL=0

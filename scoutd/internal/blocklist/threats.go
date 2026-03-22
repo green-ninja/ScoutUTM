@@ -20,9 +20,14 @@ const (
 	maxResponseSize = 50 * 1024 * 1024
 )
 
+const (
+	// maxRetries is the number of download attempts before giving up.
+	maxRetries = 3
+)
+
 // FetchThreatsBlocklist downloads the Steven Black hosts file, converts it to
 // RPZ zone format, and writes it to the blocklist directory. Returns the number
-// of domains written.
+// of domains written. Retries up to 3 times with exponential backoff.
 func FetchThreatsBlocklist(dir string) (int, error) {
 	if dir == "" {
 		dir = blocklistDir
@@ -31,6 +36,23 @@ func FetchThreatsBlocklist(dir string) (int, error) {
 		return 0, fmt.Errorf("creating blocklist dir: %w", err)
 	}
 
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * 10 * time.Second // 10s, 20s
+			time.Sleep(backoff)
+		}
+
+		n, err := fetchBlocklist(dir)
+		if err == nil {
+			return n, nil
+		}
+		lastErr = err
+	}
+	return 0, fmt.Errorf("after %d attempts: %w", maxRetries, lastErr)
+}
+
+func fetchBlocklist(dir string) (int, error) {
 	client := &http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http.Transport{

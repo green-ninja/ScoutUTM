@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Zen circle (enso) -->
+  <circle cx="256" cy="256" r="210" stroke="#8b5cf6" stroke-width="32" stroke-linecap="round" stroke-dasharray="1240 80" fill="none"/>
+
+  <!-- Triangle of connected nodes -->
+  <circle cx="256" cy="160" r="24" fill="#fff"/>
+  <circle cx="160" cy="328" r="24" fill="#fff"/>
+  <circle cx="352" cy="328" r="24" fill="#fff"/>
+  <line x1="256" y1="184" x2="168" y2="308" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+  <line x1="256" y1="184" x2="344" y2="308" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+  <line x1="184" y1="328" x2="328" y2="328" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+</svg>
